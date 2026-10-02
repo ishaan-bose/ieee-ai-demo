@@ -10,3 +10,5 @@ dist/
 models/
 checkpoints/
 .DS_Store
+*.tsbuildinfo
+.pytest_cache/
