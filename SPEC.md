@@ -283,6 +283,9 @@ All JSON. Base `http://localhost:8000`. Admin routes need header `X-Admin-Token`
 - `GET /api/submissions/{id}` → `{ status, queue_position?, progress?, stop_reason?, curves? }`
 - `GET /api/leaderboard` → reserved; returns `[]`. No ranking logic on the server.
 
+### Development
+- `GET /api/dev/hello-stream?limit=&interval=` (SSE) → `tick` events `{ count, server_time }` once per `interval` seconds (default 1), then `done: { count }` if `limit` is set. For testing the tunnel.
+
 ### Admin
 - `GET /admin/queue`; `POST /admin/jobs/{id}/kill`; `DELETE /admin/jobs/{id}`; `POST /admin/jobs/{id}/redo`
 - `POST /admin/queue/pause`, `POST /admin/queue/resume`; `POST /admin/demo-mode` `{ enabled }`
