@@ -1,0 +1,16 @@
+lines parsed: 200000 | parse errors: 0
+FEN field counts: {4: 200000}
+evals per position (top 5): [(1, 106052), (2, 42908), (3, 33492), (4, 14612), (5, 2717)]
+deepest-eval depth percentiles 5/50/95: [ 18.  30. 245.]
+share with mate as deepest eval: 0.184
+duplicate FENs in sample: 0
+cp abs percentiles 50/90/99: [  50.    523.   3006.85]
+share |cp| > 1000: 0.023
+white to move share: 0.513
+piece count mean: 24.0 | share with <= 10 pieces: 0.095
+corr(cp, white-minus-black material), white to move: +0.398
+corr(cp, white-minus-black material), black to move: +0.366
+(both positive = cp is from White's view; white +, black - = side-to-move view)
+sample fen: r2qk2r/2p1bppp/p1n5/1p1pP3/BP6/2P2P2/P4P1P/RNB1QRK1 b kq -
+sample fen: 5r1k/pp4p1/2r1pq1p/3pR3/3P1PP1/1P2Q1P1/P3R1K1/8 w - -
+sample fen: 8/3k4/5Q2/2K5/8/8/b7/8 w - -

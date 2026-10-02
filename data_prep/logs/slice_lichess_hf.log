@@ -1,0 +1,48 @@
+shard 0 /home/jovyan/demo/data/lichess_hf/data/data_0000.parquet | row groups: 54 | target positions: 6000000
+rank check (first row = best line for side to move): 7301 / 7301 ok
+shard 0 rg 1/54 | kept 177712 | batch: pieces 21.1, white-to-move 0.526, median|cp| 50, mate share 0.184 | 2s
+shard 0 rg 2/54 | kept 376335 | batch: pieces 20.5, white-to-move 0.524, median|cp| 53, mate share 0.192 | 4s
+shard 0 rg 3/54 | kept 584073 | batch: pieces 20.7, white-to-move 0.521, median|cp| 60, mate share 0.182 | 5s
+shard 0 rg 4/54 | kept 795989 | batch: pieces 21.3, white-to-move 0.518, median|cp| 57, mate share 0.160 | 7s
+shard 0 rg 5/54 | kept 1011003 | batch: pieces 21.2, white-to-move 0.516, median|cp| 62, mate share 0.166 | 9s
+shard 0 rg 6/54 | kept 1235636 | batch: pieces 21.4, white-to-move 0.516, median|cp| 59, mate share 0.153 | 11s
+shard 0 rg 7/54 | kept 1465837 | batch: pieces 21.0, white-to-move 0.517, median|cp| 68, mate share 0.159 | 13s
+shard 0 rg 8/54 | kept 1723081 | batch: pieces 21.0, white-to-move 0.514, median|cp| 58, mate share 0.128 | 16s
+shard 0 rg 9/54 | kept 2015856 | batch: pieces 16.4, white-to-move 0.509, median|cp| 65, mate share 0.151 | 18s
+shard 0 rg 10/54 | kept 2259762 | batch: pieces 20.6, white-to-move 0.516, median|cp| 63, mate share 0.171 | 20s
+shard 0 rg 11/54 | kept 2503533 | batch: pieces 20.8, white-to-move 0.518, median|cp| 65, mate share 0.162 | 23s
+shard 0 rg 12/54 | kept 2774612 | batch: pieces 20.8, white-to-move 0.513, median|cp| 58, mate share 0.118 | 25s
+shard 0 rg 13/54 | kept 3066859 | batch: pieces 16.8, white-to-move 0.506, median|cp| 87, mate share 0.143 | 27s
+shard 0 rg 14/54 | kept 3315767 | batch: pieces 20.6, white-to-move 0.514, median|cp| 64, mate share 0.156 | 29s
+shard 0 rg 15/54 | kept 3563472 | batch: pieces 20.9, white-to-move 0.517, median|cp| 66, mate share 0.155 | 32s
+shard 0 rg 16/54 | kept 3812197 | batch: pieces 21.6, white-to-move 0.515, median|cp| 65, mate share 0.131 | 34s
+shard 0 rg 17/54 | kept 4068137 | batch: pieces 21.1, white-to-move 0.514, median|cp| 64, mate share 0.153 | 36s
+shard 0 rg 18/54 | kept 4337917 | batch: pieces 21.0, white-to-move 0.514, median|cp| 68, mate share 0.148 | 39s
+shard 0 rg 19/54 | kept 4652310 | batch: pieces 20.7, white-to-move 0.509, median|cp| 58, mate share 0.092 | 42s
+shard 0 rg 20/54 | kept 4951292 | batch: pieces 18.4, white-to-move 0.511, median|cp| 81, mate share 0.166 | 45s
+shard 0 rg 21/54 | kept 5230595 | batch: pieces 20.9, white-to-move 0.514, median|cp| 72, mate share 0.143 | 47s
+shard 0 rg 22/54 | kept 5530535 | batch: pieces 20.7, white-to-move 0.513, median|cp| 60, mate share 0.115 | 50s
+shard 0 rg 23/54 | kept 5884643 | batch: pieces 13.6, white-to-move 0.503, median|cp| 44, mate share 0.144 | 53s
+shard 0 rg 24/54 | kept 6000000 | batch: pieces 20.1, white-to-move 0.513, median|cp| 76, mate share 0.169 | 54s
+shard 1 /home/jovyan/demo/data/lichess_hf/data/data_0010.parquet | row groups: 46 | target positions: 6000000
+shard 1 rg 1/46 | kept 6488506 | batch: pieces 19.9, white-to-move 0.520, median|cp| 119, mate share 0.107 | 59s
+shard 1 rg 2/46 | kept 6969992 | batch: pieces 19.8, white-to-move 0.516, median|cp| 132, mate share 0.108 | 63s
+shard 1 rg 3/46 | kept 7455274 | batch: pieces 19.3, white-to-move 0.511, median|cp| 121, mate share 0.103 | 68s
+shard 1 rg 4/46 | kept 7912509 | batch: pieces 20.3, white-to-move 0.513, median|cp| 90, mate share 0.093 | 72s
+shard 1 rg 5/46 | kept 8368942 | batch: pieces 20.6, white-to-move 0.515, median|cp| 90, mate share 0.098 | 77s
+shard 1 rg 6/46 | kept 8828720 | batch: pieces 20.5, white-to-move 0.516, median|cp| 88, mate share 0.097 | 81s
+shard 1 rg 7/46 | kept 9288803 | batch: pieces 20.6, white-to-move 0.515, median|cp| 86, mate share 0.097 | 86s
+shard 1 rg 8/46 | kept 9745509 | batch: pieces 20.2, white-to-move 0.512, median|cp| 85, mate share 0.104 | 90s
+shard 1 rg 9/46 | kept 10208886 | batch: pieces 20.1, white-to-move 0.513, median|cp| 92, mate share 0.105 | 95s
+shard 1 rg 10/46 | kept 10674903 | batch: pieces 20.1, white-to-move 0.513, median|cp| 94, mate share 0.098 | 99s
+shard 1 rg 11/46 | kept 11138846 | batch: pieces 20.0, white-to-move 0.513, median|cp| 94, mate share 0.096 | 104s
+shard 1 rg 12/46 | kept 11604976 | batch: pieces 20.2, white-to-move 0.514, median|cp| 88, mate share 0.102 | 109s
+shard 1 rg 13/46 | kept 12000000 | batch: pieces 20.1, white-to-move 0.513, median|cp| 87, mate share 0.102 | 112s
+rows read: 38797312 | positions kept: 12000000 | bad: 0
+duplicate FENs in the kept set: 0
+--- per shard ---
+shard 0: 6000000 positions | mean pieces 19.9 | <=10 pieces 0.207 | white-to-move 0.514 | median|cp| 63 | mate share 0.149
+shard 1: 6000000 positions | mean pieces 20.1 | <=10 pieces 0.152 | white-to-move 0.514 | median|cp| 95 | mate share 0.101
+validation positions: 239546
+mate>0: 1029713, mean material 6.17 | mate<0: 468955, mean material -4.87
+(mate>0 should have the higher material if positive means White mates)

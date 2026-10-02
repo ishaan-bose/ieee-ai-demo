@@ -1,0 +1,20 @@
+parquet files: 20 | first: data/data_0000.parquet | last: data/data_0019.parquet
+downloaded: /home/jovyan/demo/data/lichess_hf/data/data_0000.parquet | 2.19 GB
+rows in shard: 56197027 | row groups: 54
+schema: fen: string
+line: string
+depth: uint8
+knodes: int32
+cp: int16
+mate: int8
+sampled rows: 1000000
+row 0 | 7r/1p3k2/p1bPR3/5p2/2B2P1p/8/PP4P1/3K4 b - - | cp 69 | mate None | depth 46
+row 1 | 7r/1p3k2/p1bPR3/5p2/2B2P1p/8/PP4P1/3K4 b - - | cp 163 | mate None | depth 46
+row 2 | 7r/1p3k2/p1bPR3/5p2/2B2P1p/8/PP4P1/3K4 b - - | cp 229 | mate None | depth 46
+distinct FENs: 168788 | runs of consecutive equal FENs: 168788
+(runs close to distinct = rows for a position sit next to each other)
+rows-per-FEN histogram (top 6): [(1, 43928), (5, 23114), (3, 16347), (9, 13448), (6, 12356), (8, 11823)]
+cp null share: 0.131 | mate null share: 0.869
+corr(cp, material), white to move: +0.408
+corr(cp, material), black to move: +0.305
+(both positive = White's view, same as the jsonl dump)

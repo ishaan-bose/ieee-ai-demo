@@ -1,0 +1,42 @@
+PASS quickdraw train.jsonl | lines=1090830 expected=1090830 bad_records=0 classes=10
+PASS quickdraw val.jsonl | lines=25106 expected=25106 bad_records=0 classes=10
+PASS quickdraw pool.jsonl | lines=2579 expected=2579 bad_records=0 classes=10
+PASS quickdraw classes.json | entries=10 expected=10
+PASS quickdraw duel.json | entries=200 expected=200
+PASS quickdraw probe.json | entries=16 expected=16
+PASS quickdraw samples.json | entries=50 expected=50
+PASS speech train | X=(32479, 16000) int16 y=(32479,) int8 all-zero clips=0
+PASS speech val | X=(3898, 16000) int16 y=(3898,) int8 all-zero clips=0
+PASS speech test | X=(4269, 16000) int16 y=(4269,) int8 all-zero clips=0
+PASS speech speaker-separated splits | overlapping speakers=0
+PASS speech samples | entries=20 missing=0
+PASS speech classes.json
+PASS speech LICENSE copied
+PASS lichess boards | (12000000, 64) uint8
+PASS lichess stm | (12000000,) uint8
+PASS lichess castle | (12000000,) uint8
+PASS lichess ep | (12000000,) int8
+PASS lichess cp | (12000000,) int16
+PASS lichess mate | (12000000,) int16
+PASS lichess depth | (12000000,) int16
+PASS lichess mat | (12000000,) int8
+PASS lichess npc | (12000000,) uint8
+PASS lichess is_val | (12000000,) uint8
+PASS lichess shard_of | (12000000,) uint8
+PASS lichess boards: codes 0-12 | max=12
+PASS lichess boards: exactly one king per side | 12000000/12000000
+PASS lichess npc matches boards | 12000000/12000000
+PASS lichess stm in {0,1}
+PASS lichess castle in 0-15
+PASS lichess ep in -1..7
+PASS lichess cp within +-10000 | min=-10000 max=10000
+PASS lichess mate rows have cp=0 | mate rows=1498668
+PASS lichess validation share ~2% | 0.0200
+366M	/home/jovyan/demo/data/quickdraw/processed
+1.3G	/home/jovyan/demo/data/speech/processed
+882M	/home/jovyan/demo/data/lichess
+meta: {'kept': 12000000, 'bad': 0, 'rows_read': 38797312}
+
+DISK:
+
+ALL PASS (34/34 passed)

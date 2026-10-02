@@ -1,0 +1,17 @@
+{
+  "shards": [
+    "/home/jovyan/demo/data/lichess_hf/data/data_0000.parquet",
+    "/home/jovyan/demo/data/lichess_hf/data/data_0010.parquet"
+  ],
+  "per_shard_cap": 6000000,
+  "kept": 12000000,
+  "bad": 0,
+  "rows_read": 38797312,
+  "convention": "cp and mate are White's view; boards index=row*8+col, row0=rank8; pieces 1-6 PNBRQK white, 7-12 black",
+  "selection": "per FEN, first row among rows at the greatest depth",
+  "sample": {
+    "rows": 2000,
+    "stride": 6000,
+    "note": "every stride-th row of the full 12M-position arrays"
+  }
+}
