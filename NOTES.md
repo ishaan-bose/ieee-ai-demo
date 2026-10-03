@@ -181,3 +181,5 @@ browsers other than Chromium, projector scaling, Windows laptop commands, the se
 6. Chess strength of the House Net is whatever the random search finds in the time it is given (`train_house_net.py --trials N`); you can also hand it a config with `--config file.json`.
 7. Frontend playback of the tournament (bracket.json) is not built (SPEC 12 cut order lists it as a first thing to drop); the data for it is ready.
 8. Start-at-boot is still manual (see the phase 1 note); `start_backend.sh` is idempotent.
+
+- Mock e2e "Act 3 overfit" once failed with `Malformed value`: a stale gitignored `frontend/public/cache/act3/overfit.json` from the `run_on_server.sh --quick` rehearsal had only 2 runs, so the slider max was 1. The test now fills the slider's own max. Delete `frontend/public/cache/` after rehearsals (the stage that syncs real caches overwrites it anyway).

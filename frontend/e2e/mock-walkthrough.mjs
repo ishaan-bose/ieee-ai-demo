@@ -134,7 +134,8 @@ await check("Act 3 trap reveals confusion matrix, recall and the fix; overfittin
   await space(); await page.getByTestId("recall").waitFor();
   await space(); await page.getByTestId("weighted").waitFor();
   await goto("a3-overfit");
-  await page.getByTestId("size-slider").fill("3");
+  const slider = page.getByTestId("size-slider");
+  await slider.fill(String(await slider.getAttribute("max")));
   await space(); await page.waitForTimeout(1500);
 });
 
