@@ -106,7 +106,7 @@ class DoodleData:
         """Contiguous rows [start, stop) for full-batch accumulation."""
         if self.resident:
             return self.train_x[start:stop].reshape(stop - start, -1).float() / 255.0, self.train_y[start:stop]
-        x = torch.from_numpy(np.asarray(self.train_x[start:stop])).to(self.device).reshape(stop - start, -1).float() / 255.0
+        x = torch.from_numpy(np.array(self.train_x[start:stop])).to(self.device).reshape(stop - start, -1).float() / 255.0
         return x, torch.from_numpy(self.train_y[start:stop].astype(np.int64)).to(self.device)
 
 

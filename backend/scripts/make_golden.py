@@ -56,8 +56,34 @@ def audio_fixture() -> dict:
             "cases": cases}
 
 
+def inference_fixture() -> dict:
+    """Tiny conv and dense models in the browser format + torch outputs, for the TypeScript forward-pass test."""
+    import torch
+    import torch.nn as nn
+
+    from app.export_format import export_sequential
+
+    models = []
+    for name, build, shape in (
+        ("conv", lambda: nn.Sequential(nn.Conv2d(1, 2, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2), nn.Conv2d(2, 3, 3, padding=1), nn.ReLU(),
+                                       nn.Flatten(), nn.Linear(3 * 4 * 5, 4)), (1, 8, 10)),
+        ("dense", lambda: nn.Sequential(nn.Linear(6, 5), nn.ReLU(), nn.Linear(5, 3)), (6,)),
+    ):
+        torch.manual_seed(3)
+        m = build()
+        layers, w = export_sequential(m)
+        rng = np.random.default_rng(1)
+        cases = []
+        for _ in range(3):
+            x = rng.normal(size=shape).astype(np.float32)
+            cases.append({"x": x.ravel().tolist(), "y": m(torch.from_numpy(x)[None]).detach().numpy()[0].tolist()})
+        models.append({"name": name, "input_shape": list(shape), "layers": layers, "weights": w.tolist(), "cases": cases})
+    return {"tolerance": 1e-4, "models": models}
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "inference.json").write_text(json.dumps(inference_fixture(), separators=(",", ":")))
     (OUT / "rasterizer.json").write_text(json.dumps(rasterizer_fixture(), separators=(",", ":")))
     (OUT / "audio.json").write_text(json.dumps(audio_fixture(), separators=(",", ":")))
     print("wrote", [f"{p.name} {p.stat().st_size // 1024} KB" for p in sorted(OUT.glob("*.json"))])
