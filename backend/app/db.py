@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 TABLES = ("submissions", "jobs", "job_metrics", "checkpoints", "races", "admin_events")
 
@@ -106,6 +106,15 @@ CREATE TABLE IF NOT EXISTS admin_events (
 CREATE INDEX IF NOT EXISTS admin_events_kind ON admin_events (kind, id DESC);
 """
 
+# Migrations: version N -> N+1. The owner's server already has a v1 database from phase 1, so schema changes are
+# applied to existing databases here (CREATE TABLE IF NOT EXISTS would not add columns).
+MIGRATIONS = {
+    1: [  # v1 -> v2: idempotent submissions (a client retries uploads after the network drops)
+        "ALTER TABLE submissions ADD COLUMN client_id TEXT",
+        "CREATE UNIQUE INDEX IF NOT EXISTS submissions_client_id ON submissions (client_id) WHERE client_id IS NOT NULL",
+    ],
+}
+
 # Jobs that still count as "in the queue" (waiting or running).
 OPEN_JOB_STATUSES = ("queued", "running")
 
@@ -128,7 +137,15 @@ def init_db(path: Path | str) -> None:
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         if str(mode).lower() != "wal":
             raise RuntimeError(f"SQLite refused WAL mode (got {mode!r}); is {path} on a network filesystem?")
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        fresh = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='submissions'").fetchone()[0] == 0
         conn.executescript(SCHEMA)
+        if fresh or version < 1:  # new (or unversioned) database: the CREATE statements above are the v1 schema
+            version = 1
+        while version < SCHEMA_VERSION:
+            for stmt in MIGRATIONS[version]:
+                conn.execute(stmt)
+            version += 1
         conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     finally:
         conn.close()

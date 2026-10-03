@@ -283,6 +283,14 @@ All JSON. Base `http://localhost:8000`. Admin routes need header `X-Admin-Token`
 - `GET /api/submissions/{id}` → `{ status, queue_position?, progress?, stop_reason?, curves? }`
 - `GET /api/leaderboard` → reserved; returns `[]`. No ranking logic on the server.
 
+### Extensions added while building (kept in sync with the code)
+- `GET /api/config/schema` → `{ defaults, json_schema, tiers, max_params, activations, budget_flops }` for generating the `/build` form.
+- `POST /api/submissions` also accepts an optional `client_id` (random id made by the browser): a retried upload (the network dropped) returns the same submission instead of creating a duplicate. A missing/false `consent` is rejected with `consent_required`.
+- `POST /api/demo/races` returns `503 data_unavailable` when the doodle tensors are not built; the frontend then plays the cached race. `max_seconds` is capped by `RACE_MAX_SECONDS` (120).
+- Presenter sync: `PUT /api/presenter` `{stage_id, stage_index, title}` (laptop B publishes its stage) and `GET /api/presenter` (the phone's `/presenter` page polls it). In memory only.
+- `GET /admin/stream?limit=N` stops after N events (tests). `GET /admin/export?format=json|csv&include_contact=false`: contact info is left out unless asked (SPEC 13).
+- `POST /admin/reset` keeps `models/house-net/` (the House Net is not a participant run).
+
 ### Development
 - `GET /api/dev/hello-stream?limit=&interval=` (SSE) → `tick` events `{ count, server_time }` once per `interval` seconds (default 1), then `done: { count }` if `limit` is set. For testing the tunnel.
 
