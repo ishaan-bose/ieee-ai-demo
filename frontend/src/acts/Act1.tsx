@@ -14,6 +14,7 @@ import { stageIndex } from "../state/stages";
 import { useStage, useStageEvent } from "../state/StageProvider";
 
 const G = 48;
+const FRAME_MS = 33; // the morph / line animations re-render the whole act per step: ~30 steps a second look the same as 60 and cost half
 const N = 200;
 const sub = (n: number) => String.fromCharCode(0x2080 + n);
 const clusters = twoClusters(N, 1), spiral = spirals(N, 2);
@@ -82,16 +83,15 @@ export function Act1() {
   const runId = useRef(0);
   const rng = useRef(mulberry32(11));
   const morphRaf = useRef(0);
+  const lineRaf = useRef(0);
 
   const X = useMemo(() => lerpPoints(clusters.X, spiral.X, morph), [morph]);
   const y = clusters.y; // labels agree between the two datasets (i % 2)
 
-  // worker lifecycle
-  useEffect(() => {
-    const w = new Worker(new URL("../workers/mlp.worker.ts", import.meta.url), { type: "module" });
-    worker.current = w;
-    return () => w.terminate();
-  }, []);
+  // The worker is created on the first training run, not on mount: entering Act 1 stays cheap (a module worker costs a full module-graph load,
+  // twice under StrictMode in dev), and Acts that never train never pay for it. It is terminated when Act 1 unmounts.
+  const getWorker = useCallback(() => (worker.current ??= new Worker(new URL("../workers/mlp.worker.ts", import.meta.url), { type: "module" })), []);
+  useEffect(() => () => { worker.current?.terminate(); worker.current = null; }, []);
 
   const stopRun = useCallback(() => { worker.current?.postMessage({ type: "stop" }); runId.current++; setRunning(false); stopRunTimer(); }, []);
 
@@ -103,7 +103,12 @@ export function Act1() {
     const target = sIdx >= stageIndex("a1-spirals") ? 1 : 0;
     cancelAnimationFrame(morphRaf.current);
     const from = morph, t0 = performance.now();
-    const loop = () => { const f = Math.min(1, (performance.now() - t0) / 1400); setMorph(from + (target - from) * f); if (f < 1) morphRaf.current = requestAnimationFrame(loop); };
+    let lastStep = 0;
+    const loop = () => {
+      const now = performance.now(), f = Math.min(1, (now - t0) / 1400);
+      if (f >= 1 || now - lastStep >= FRAME_MS) { lastStep = now; setMorph(from + (target - from) * f); }
+      if (f < 1) morphRaf.current = requestAnimationFrame(loop);
+    };
     if (from !== target) morphRaf.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(morphRaf.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -115,16 +120,23 @@ export function Act1() {
 
   const animateLine = useCallback((to: Line) => {
     const from = line, t0 = performance.now();
-    const loop = () => { const f = Math.min(1, (performance.now() - t0) / 1100), e = f * f * (3 - 2 * f); setLine({ w1: from.w1 + (to.w1 - from.w1) * e, w2: from.w2 + (to.w2 - from.w2) * e, b: from.b + (to.b - from.b) * e }); if (f < 1) requestAnimationFrame(loop); };
+    let lastStep = 0;
+    cancelAnimationFrame(lineRaf.current);
+    const loop = () => {
+      const now = performance.now(), f = Math.min(1, (now - t0) / 1100), e = f * f * (3 - 2 * f);
+      if (f >= 1 || now - lastStep >= FRAME_MS) { lastStep = now; setLine({ w1: from.w1 + (to.w1 - from.w1) * e, w2: from.w2 + (to.w2 - from.w2) * e, b: from.b + (to.b - from.b) * e }); }
+      if (f < 1) lineRaf.current = requestAnimationFrame(loop);
+    };
     loop();
   }, [line]);
+  useEffect(() => () => cancelAnimationFrame(lineRaf.current), []);
 
   const train = useCallback((activation: string, hidden: number[], epochs: number) => {
     stopRun();
     const id = ++runId.current;
     setRunning(true); setBroke(null); setEpoch(0);
     startRunTimer(15);
-    const w = worker.current!;
+    const w = getWorker();
     const act = getActivation(activation);
     const p = params[activation] ?? {};
     w.onmessage = (e: MessageEvent<WorkerProgress | WorkerDone>) => {
@@ -138,7 +150,7 @@ export function Act1() {
       addRun(m.paramCount, 6 * m.paramCount * epochs * N);
     };
     w.postMessage({ type: "train", id, X: Float32Array.from(X), y: Uint8Array.from(y), epochs, slow, grid: G, cfg: { hidden, activation, params: p, seed: 5, lr: activation === "linear" ? 0.01 : 0.02 } });
-  }, [X, y, params, slow, stopRun]);
+  }, [X, y, params, slow, stopRun, getWorker]);
 
   const trainFor = useCallback(() => {
     if (stage.id === "a1-depth") train("linear", Array(depth).fill(8), 160);
@@ -158,6 +170,8 @@ export function Act1() {
   useStageEvent("reset", () => { stopRun(); setGrid(null); setAcc(null); setResults({}); setFused(false); });
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "l" || e.key === "L") setSlow((s) => !s); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
   void forceFallback;
+
+  const onParam = useCallback((name: string, v: number) => { const a = getActivation(name); if (a.params) setParams((p) => ({ ...p, [name]: { [a.params!.key]: v } })); }, []);
 
   const showNet = !usingLine;
   const inGallery = stage.id === "a1-gallery";
@@ -214,8 +228,7 @@ export function Act1() {
       <Unlock id="gallery">
         <div className="grid grid-cols-5 gap-2" data-testid="gallery">
           {ACTIVATIONS.map((a) => (
-            <div key={a.name}><ActivationCard def={a} params={params[a.name]} selected={selected === a.name} onSelect={() => setSelected(a.name)} result={results[a.name]}
-              onParam={(v) => a.params && setParams((p) => ({ ...p, [a.name]: { [a.params!.key]: v } }))} /></div>
+            <div key={a.name}><ActivationCard def={a} params={params[a.name]} selected={selected === a.name} onSelect={setSelected} result={results[a.name]} onParam={onParam} /></div>
           ))}
         </div>
       </Unlock>

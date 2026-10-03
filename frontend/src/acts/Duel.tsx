@@ -5,6 +5,7 @@ import { CLASSES, loadDoodles, paintStrokes, partialStrokes, strokeCountVisible,
 import { forward, getModel, softmax, type Model } from "../lib/inference";
 import { rasterize, toModelInput } from "../lib/rasterizer";
 import { mulberry32, shuffled } from "../lib/rng";
+import { fitCanvas } from "../lib/canvas";
 import { urlParam } from "../lib/env";
 import { setHumanDuel, useSession } from "../lib/session";
 import { useStageEvent } from "../state/StageProvider";
@@ -45,9 +46,14 @@ export function Duel({ mode }: { mode: "duel" | "rematch" }) {
   const fracRef = useRef(0);
   const startTs = useRef(0);
 
-  const seed = Number(urlParam("seed") ?? Math.floor(Math.random() * 1e6));
-  const load = useCallback(() => { loadDoodles("duel").then((d) => setRounds(makeRounds(d, seed + (mode === "rematch" ? 0 : 0)))).catch(() => undefined); }, [seed, mode]);
-  useEffect(load, [load]);
+  // The seed must be fixed for the life of the component. (It used to be recomputed with Math.random() on EVERY render, which changed `load`,
+  // re-ran the effect, set new rounds, re-rendered, and so on forever: an endless render loop that pinned the CPU on the first screen.)
+  const [seed] = useState(() => Number(urlParam("seed") ?? Math.floor(Math.random() * 1e6)));
+  useEffect(() => {
+    let live = true;
+    loadDoodles("duel").then((d) => { if (live) setRounds(makeRounds(d, seed)); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [seed]);
   useEffect(() => { if (mode === "rematch") getModel("doodle").then(setModel); }, [mode]);
 
   const reset = useCallback(() => { setPhase("idle"); setRound(0); setFrac(0); setOptionsAt(null); setHuman(null); setAi(null); setScore({ human: 0, ai: 0, played: 0 }); answered.current = false; }, []);
@@ -114,10 +120,8 @@ export function Duel({ mode }: { mode: "duel" | "rematch" }) {
   useEffect(() => {
     const c = cv.current;
     if (!c || !cur) return;
-    const size = 460, dpr = window.devicePixelRatio || 1;
-    c.width = size * dpr; c.height = size * dpr;
-    const ctx = c.getContext("2d")!;
-    ctx.scale(dpr, dpr); ctx.clearRect(0, 0, size, size);
+    const size = 460;
+    const ctx = fitCanvas(c, size, size);
     const shown = phase === "idle" ? [] : phase === "drawing" ? partialStrokes(cur.rec.d, frac) : cur.rec.d;
     paintStrokes(ctx, shown, size, { bounds: cur.rec.d, width: 7, color: "#f1f5f9" });
   }, [cur, frac, phase]);

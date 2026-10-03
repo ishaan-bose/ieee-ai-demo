@@ -1,22 +1,21 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { useEffect, useRef, type ReactNode } from "react";
-import { useUnlocked } from "../state/StageProvider";
+import { useStage } from "../state/StageProvider";
+import { fitCanvas } from "../lib/canvas";
 import { useRunTimer } from "../lib/runTimer";
 import { paintStrokes, type DoodleRecord } from "../lib/doodle";
 import type { Stroke } from "../lib/rasterizer";
 
-/** Children exist only once `id` is unlocked (progressive disclosure); they pop in with a short animation. */
+/** Children exist only once `id` is unlocked (progressive disclosure). An element unlocked by THIS stage pops in with a short animation; one
+ *  that an earlier stage already unlocked is simply there (it used to re-play its spring on every stage, ~10 motion components per press). */
 export function Unlock({ id, children, className }: { id: string; children: ReactNode; className?: string }) {
-  const on = useUnlocked(id);
+  const { stage, unlocked } = useStage();
+  if (!unlocked.has(id)) return null;
+  if (!stage.unlocks.includes(id)) return <div className={className}>{children}</div>;
   return (
-    <AnimatePresence>
-      {on && (
-        <motion.div key={id} className={className} initial={{ opacity: 0, scale: 0.92, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95 }} transition={{ type: "spring", stiffness: 260, damping: 22 }}>
-          {children}
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <motion.div className={className} initial={{ opacity: 0, scale: 0.92, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ type: "spring", stiffness: 260, damping: 22 }}>
+      {children}
+    </motion.div>
   );
 }
 
@@ -75,11 +74,7 @@ export function Doodle({ record, strokes, size = 120, color }: { record?: Doodle
   useEffect(() => {
     const c = ref.current;
     if (!c || !d) return;
-    const dpr = window.devicePixelRatio || 1;
-    c.width = size * dpr; c.height = size * dpr;
-    const ctx = c.getContext("2d")!;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, size, size);
+    const ctx = fitCanvas(c, size, size);
     paintStrokes(ctx, d, size, { color: color ?? "#e2e8f0", width: Math.max(2, size / 40) });
   }, [d, size, color]);
   return <canvas ref={ref} style={{ width: size, height: size }} className="rounded-lg bg-slate-900" />;

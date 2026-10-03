@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect } from "react";
 import { MOCK, isMockOffline, setMockOffline } from "./lib/env";
+import { PerfOverlay } from "./components/PerfOverlay";
 import { HealthProvider } from "./state/health";
 import Demo from "./pages/Demo";
 
@@ -26,5 +27,5 @@ export default function App() {
   useMockOfflineKey();
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
   const page = path === "/presenter" ? <Presenter /> : path === "/build" ? <Build /> : path === "/admin" ? <Admin /> : <Demo />;
-  return <HealthProvider><Suspense fallback={<div className="p-10 text-slate-500">loading…</div>}>{page}</Suspense></HealthProvider>;
+  return <HealthProvider><Suspense fallback={<div className="p-10 text-slate-500">loading…</div>}>{page}</Suspense><PerfOverlay /></HealthProvider>;
 }

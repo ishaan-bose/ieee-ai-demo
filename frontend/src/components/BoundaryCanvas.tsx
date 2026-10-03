@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { fitCanvas } from "../lib/canvas";
 
 export interface Line { w1: number; w2: number; b: number }
 const EXT = 1.2; // the view covers [-1.2, 1.2]^2
@@ -9,11 +10,7 @@ export function BoundaryCanvas({ X, y, grid, G = 48, line, size = 520 }: { X: Fl
   const cv = useRef<HTMLCanvasElement>(null);
   const off = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
-    const c = cv.current!;
-    const dpr = window.devicePixelRatio || 1;
-    c.width = size * dpr; c.height = size * dpr;
-    const ctx = c.getContext("2d")!;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const ctx = fitCanvas(cv.current!, size, size);
     ctx.fillStyle = "#0f172a"; ctx.fillRect(0, 0, size, size);
     const px = (x: number) => ((x + EXT) / (2 * EXT)) * size, py = (v: number) => ((EXT - v) / (2 * EXT)) * size;
     if (grid) {

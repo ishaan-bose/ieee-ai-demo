@@ -14,25 +14,40 @@ export function NetworkDiagram({ data, pulse, mode = "forward", width = 760, hei
   const dataRef = useRef<DiagramData | null>(data);
   dataRef.current = data;
 
+  // Draw ON DEMAND: a frame is scheduled when the data / pulse / size changes and then only while signal particles are still flying.
+  // (It used to redraw ~1000 edges + gradients 60 times a second for as long as the stage was open, even when nothing moved.)
+  const raf = useRef(0);
+  const drawRef = useRef<() => void>(() => undefined);
+  const request = useRef(() => undefined as void);
+  request.current = () => {
+    if (raf.current) return;
+    raf.current = requestAnimationFrame(() => {
+      raf.current = 0;
+      drawRef.current();
+      const d = dataRef.current;
+      const flying = d && parts.current.length > 0 && (performance.now() - t0.current) / 1000 < d.edges.length * 0.32 + 0.9;
+      if (flying) request.current();
+    });
+  };
+
   useEffect(() => {
-    if (!data) return;
     const ps: Particle[] = [];
-    data.edges.forEach((layer, l) => layer.forEach((row, i) => row.forEach((s, j) => { if (s > 0.25) for (let k = 0; k < 2; k++) ps.push({ l, i, j, t0: Math.random() * 0.25, s }); })));
+    if (data) data.edges.forEach((layer, l) => layer.forEach((row, i) => row.forEach((s, j) => { if (s > 0.25) for (let k = 0; k < 2; k++) ps.push({ l, i, j, t0: Math.random() * 0.25, s }); })));
     parts.current = ps;
     t0.current = performance.now();
+    request.current();
   }, [pulse, data]);
 
   useEffect(() => {
     const c = cv.current!;
     const dpr = window.devicePixelRatio || 1;
     c.width = width * dpr; c.height = height * dpr;
-    let raf = 0;
     const draw = () => {
       const ctx = c.getContext("2d")!;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
       const d = dataRef.current;
-      if (!d) { raf = requestAnimationFrame(draw); return; }
+      if (!d) return;
       const nc = d.cols.length, padX = 70, padY = 24;
       const xs = d.cols.map((_, c2) => padX + (c2 * (width - 2 * padX - 70)) / (nc - 1));
       const ys = d.cols.map((col) => col.shown.map((_, i) => padY + (col.shown.length === 1 ? 0.5 : i / (col.shown.length - 1)) * (height - 2 * padY)));
@@ -68,10 +83,10 @@ export function NetworkDiagram({ data, pulse, mode = "forward", width = 760, hei
       ctx.fillStyle = "#64748b"; ctx.font = "13px system-ui"; ctx.textAlign = "center";
       d.cols.forEach((col, c2) => ctx.fillText(`${col.label} (${col.total})`, xs[c2], height - 5));
       ctx.textAlign = "start";
-      raf = requestAnimationFrame(draw);
     };
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
+    drawRef.current = draw;
+    request.current();
+    return () => { cancelAnimationFrame(raf.current); raf.current = 0; };
   }, [width, height, mode, labels]);
   return <canvas ref={cv} style={{ width, height }} className="rounded-2xl bg-slate-900/60" data-testid="network" />;
 }

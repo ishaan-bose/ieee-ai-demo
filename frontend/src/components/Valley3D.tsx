@@ -1,5 +1,5 @@
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Component, useMemo, useRef, type ReactNode } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Component, useEffect, useMemo, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import { loss } from "./Valley";
 
@@ -58,6 +58,14 @@ function Rig() {
   return null;
 }
 
+/** Render ON DEMAND at ~24 frames a second instead of letting three.js redraw at the display rate (60-144 Hz) for as long as the stage is open.
+ *  The scene is a slowly orbiting camera and a rolling ball: 24 fps looks identical and cuts the GPU/CPU cost (much more in software GL). */
+function Ticker({ fps = 24 }: { fps?: number }) {
+  const invalidate = useThree((st) => st.invalidate);
+  useEffect(() => { const id = setInterval(() => invalidate(), 1000 / fps); return () => clearInterval(id); }, [invalidate, fps]);
+  return null;
+}
+
 class Boundary extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   componentDidCatch() { this.props.onError(); this.setState({ failed: true }); }
@@ -73,10 +81,10 @@ export function Valley3D({ w, trail, onError }: { w: number; trail: number[]; on
   return (
     <Boundary onError={onError}>
       <div className="h-[300px] w-full overflow-hidden rounded-2xl bg-slate-900/60" data-testid="valley3d">
-        <Canvas camera={{ fov: 44, position: [0, 3.0, 5.6] }} onCreated={({ gl }) => gl.setClearColor("#0b1220")}>
+        <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ fov: 44, position: [0, 3.0, 5.6] }} onCreated={({ gl }) => gl.setClearColor("#0b1220")}>
           <ambientLight intensity={0.7} />
           <directionalLight position={[3, 5, 2]} intensity={1.6} />
-          <Surface /><Ball w={w} /><Trail trail={trail} /><Rig />
+          <Surface /><Ball w={w} /><Trail trail={trail} /><Rig /><Ticker />
         </Canvas>
       </div>
     </Boundary>

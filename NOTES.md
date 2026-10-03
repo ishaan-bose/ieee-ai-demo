@@ -183,3 +183,24 @@ browsers other than Chromium, projector scaling, Windows laptop commands, the se
 8. Start-at-boot is still manual (see the phase 1 note); `start_backend.sh` is idempotent.
 
 - Mock e2e "Act 3 overfit" once failed with `Malformed value`: a stale gitignored `frontend/public/cache/act3/overfit.json` from the `run_on_server.sh --quick` rehearsal had only 2 runs, so the slider max was 1. The test now fills the slider's own max. Delete `frontend/public/cache/` after rehearsals (the stage that syncs real caches overwrites it anyway).
+
+## Performance fix: the freeze on the first screens
+
+- **Root cause.** `Duel.tsx` computed `seed = Number(urlParam("seed") ?? Math.floor(Math.random() * 1e6))` on every render. A new seed re-created `load`,
+  `useEffect(load, [load])` re-ran, `setRounds` re-rendered, which produced a new seed: an endless render loop on the first screen (and on the
+  rematch). Measured under a 4x CPU throttle: 95% (dev) / 76% (production build) main-thread CPU on the idle first screen, JS event listeners
+  growing 935 -> 5344 (dev) / 3659 -> 35121 (production), heap +29 / +58 MB, and the page stopped answering key presses. Every e2e test passed
+  `&seed=3` in the URL, which turns the random seed off, so none of them ever ran the buggy path. The seed is now fixed per component instance.
+- **Other things fixed because they were measured or clearly wasteful:** the stage wrapper used `AnimatePresence mode="wait"` (the old stage stayed mounted
+  250 ms and re-rendered against the new stage's context) -> no exit animation; every `Unlock` replayed its spring on every stage -> only elements unlocked
+  by the current stage animate; the network diagram redrew ~1000 edges at 60 fps forever -> on demand; the 3D valley rendered at the display rate forever ->
+  24 fps on demand, dpr capped at 1.5; canvases resized their bitmap on every frame (`canvas.width = ...`) -> `lib/canvas.ts fitCanvas`; the gallery
+  re-plotted 15 cards on every training tick and on every entry -> memoised + cached; the Act 1 worker was created on mount (twice under StrictMode) ->
+  created on the first training run; the morph / line animations re-rendered the whole act at 60 fps -> ~30 fps; presenter sync fired one request per key
+  press even against a switched-off backend -> only when online and debounced 300 ms; the health poll re-rendered every consumer every 3 s -> only on change.
+- **Looked at and found fine:** no heavy CSS (no backdrop-filter, blur, shadows), the model `.bin` files and race JSON are fetched once and cached, no
+  BroadcastChannel echo (the presenter never posts back), key listeners are removed on every cleanup, the health poll is one 3 s interval with no retry
+  loop, workers are terminated on unmount.
+- **Dev builds are ~2x slower than production** (React dev mode + StrictMode renders everything twice); the gate's 200 ms limit passes on both.
+- `real-backend-smoke.mjs` can fail its "live" check right after the backend starts (the first race pays PyTorch's cold-start cost, more than the 15 s it
+  waits). Start the backend and run one race by hand first, or just re-run.

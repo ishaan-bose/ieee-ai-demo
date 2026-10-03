@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { STAGES, stageIndex, unlockedAt, type Stage } from "./stages";
 import { urlParam } from "../lib/env";
 import { api } from "../lib/api";
+import { useHealth } from "./health";
 
 type Ev = "run" | "skip" | "reset";
 type Handler = () => void;
@@ -51,13 +52,23 @@ export function StageProvider({ children }: { children: ReactNode }) {
   const emit = useCallback((ev: Ev) => handlers.current[ev].forEach((h) => h()), []);
   const stage = STAGES[index];
 
+  const { online } = useHealth();
+  const channel = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    try { channel.current = new BroadcastChannel(CHANNEL); } catch { /* old browser */ }
+    return () => { channel.current?.close(); channel.current = null; };
+  }, []);
   useEffect(() => {
     try { sessionStorage.setItem(STORE_KEY, String(index)); } catch { /* ignore */ }
     // Publish the stage so the presenter's phone (/presenter) and other tabs follow along.
     const msg = { stage_id: stage.id, stage_index: index, title: stage.title };
-    try { const ch = new BroadcastChannel(CHANNEL); ch.postMessage(msg); ch.close(); } catch { /* old browser */ }
-    api.presenterPut(msg).catch(() => undefined);
-  }, [index, stage]);
+    try { channel.current?.postMessage(msg); } catch { /* closed */ }
+    // The server copy is for a phone on another device. Only send it while the server is reachable, and only once the presenter stops
+    // pressing keys (a burst of arrow presses used to fire one request each, all failing slowly against a switched-off backend).
+    if (!online) return;
+    const t = setTimeout(() => { api.presenterPut(msg).catch(() => undefined); }, 300);
+    return () => clearTimeout(t);
+  }, [index, stage, online]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

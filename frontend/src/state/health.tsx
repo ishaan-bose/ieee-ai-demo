@@ -19,12 +19,12 @@ export function HealthProvider({ children, intervalMs = 3000 }: { children: Reac
       try {
         const h = await api.health();
         if (stop) return;
-        setState({ online: true, health: h, checked: true });
+        setState((cur) => (cur.online && cur.checked && JSON.stringify(cur.health) === JSON.stringify(h) ? cur : { online: true, health: h, checked: true })); // unchanged -> no re-render of every consumer
         if (!was.current) flushPending().catch(() => undefined);
         was.current = true;
       } catch {
         if (stop) return;
-        setState({ online: false, health: null, checked: true });
+        setState((cur) => (!cur.online && cur.checked ? cur : { online: false, health: null, checked: true }));
         was.current = false;
       }
     };

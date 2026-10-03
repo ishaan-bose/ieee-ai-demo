@@ -177,7 +177,8 @@ which is the tunnel. (`/admin` itself, opened in the browser, is the admin *page
 
 **Demo keys:** `→` next · `←` back · `Space` train/run · `S` skip to the recorded result · `R` reset stage ·
 `G` jump to any stage · `F` force recorded playback for this stage · `P` show the tiny "offline" marker on the big screen ·
-`L` slow-mo for Act 1 training · `T` hold to speak (Act 3) · `,` `.` previous/next sample clip · `1`-`4` answer the duel.
+`L` slow-mo for Act 1 training · `T` hold to speak (Act 3) · `,` `.` previous/next sample clip · `1`-`4` answer the duel ·
+`Shift+D` performance overlay (frames/s, long tasks, JS heap; click it to copy the numbers; off by default, `?perf=1` opens it at load).
 
 **Phone as presenter notes:** run `FRONTEND_HOST=0.0.0.0 npm run dev`, then open `http://<laptop-ip>:5173/presenter` on the
 phone (same Wi-Fi). The phone follows whichever stage the laptop is on. This exposes the dev server on your Wi-Fi: use it on a
@@ -202,9 +203,19 @@ cd frontend && npm test                                  # unit tests: rasterize
 npm run build                                            # type check + production build
 npm run dev                                              # (in another terminal) then:
 npx playwright install chromium                          # once
-npm run e2e                                              # 17 UI checks against the mock server, no backend needed
+npm run e2e                                              # 19 UI checks against the mock server, no backend needed
+BASE=http://127.0.0.1:5173 npm run e2e:perf              # PERFORMANCE gate under a 4x CPU throttle (see below); also run it on `npm run build` + `npx vite preview` (port 4173)
 npm run bench:inference                                  # browser inference time of the bundled models (SPEC 11 item 7)
 ```
+
+### Performance gate
+
+`npm run e2e:perf` opens the demo (plain URL with no backend, and `?mock=1`) at 1920x1080 with the CPU throttled 4x, presses `→`/`←`
+30 times over the first stages and **fails** if a key press takes more than 200 ms to render, if the first screen uses more than 5% of the
+main thread while nobody touches it, if the JS heap grows by more than 50 MB, or if any stage (all 19 are opened in turn) never goes idle.
+Run it against the dev server and the production build (`npm run build && npx vite preview --port 4173`, then `BASE=http://127.0.0.1:4173`).
+`npm run perf:probe -- --url "/?mock=1" --headed --software-gl` (use `xvfb-run -a` without a display) prints the raw numbers for one page.
+It exists because the unit tests and the 1x walkthrough did not notice an infinite render loop on the first screen.
 
 ## 7. The tournament (server, by hand, after the event)
 

@@ -145,6 +145,15 @@ await check("Act 4: tech tree, rematch, close with stats and QR", async () => {
   await goto("a4-close"); await page.getByTestId("stats").waitFor(); await page.getByTestId("booth-url").waitFor();
 });
 
+await check("Shift+D toggles the performance overlay (off by default)", async () => {
+  await goto("a0-duel");
+  must(await page.getByTestId("perf-overlay").count() === 0, "overlay must start hidden");
+  await page.keyboard.press("Shift+D"); await page.getByTestId("perf-overlay").waitFor();
+  await page.waitForTimeout(1200);
+  must(/frames\/s/.test(await page.getByTestId("perf-overlay").innerText()), "overlay shows no numbers");
+  await page.keyboard.press("Shift+D"); await page.getByTestId("perf-overlay").waitFor({ state: "detached" });
+});
+
 await check("G menu jumps stages; arrows navigate", async () => {
   await goto("a0-duel");
   await page.keyboard.press("g");

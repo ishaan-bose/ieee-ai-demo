@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { fitCanvas } from "../lib/canvas";
 
 // Hero visual 3 (cartoon). Gradient descent on a 1-D valley: L(w) = k/2 (w - w*)^2 + ripples. A CARTOON of the real landscape,
 // which has millions of dimensions. step*k < ~0.1 crawls, ~0.1-1 glides, 1-2 bounces past the bottom, > 2 explodes.
@@ -33,9 +34,8 @@ export function useValley(step: number) {
 export function Valley2D({ w, trail, size = 520 }: { w: number; trail: number[]; size?: number }) {
   const cv = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const c = cv.current!, dpr = window.devicePixelRatio || 1, H = 300;
-    c.width = size * dpr; c.height = H * dpr;
-    const ctx = c.getContext("2d")!; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, size, H);
+    const H = 300;
+    const ctx = fitCanvas(cv.current!, size, H);
     const X = (v: number) => ((v + 2.2) / 4.4) * size, Y = (v: number) => H - 20 - Math.min(6, v) * 38;
     ctx.beginPath();
     for (let i = 0; i <= 200; i++) { const v = -2.2 + (i / 200) * 4.4; if (i === 0) ctx.moveTo(X(v), Y(loss(v) + 0.1)); else ctx.lineTo(X(v), Y(loss(v) + 0.1)); }

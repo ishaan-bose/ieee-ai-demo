@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import { Act1 } from "../acts/Act1";
 import { Act2Forward } from "../acts/Act2Forward";
@@ -46,13 +46,12 @@ function Shell() {
       <header className="mb-5 flex items-end justify-between">
         <div>
           <div className="text-lg uppercase tracking-widest text-sky-400">Act {stage.act}</div>
-          <AnimatePresence mode="wait"><motion.h1 key={stage.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} className="text-4xl font-bold" data-testid="stage-title">{stage.title}</motion.h1></AnimatePresence>
+          <motion.h1 key={stage.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="text-4xl font-bold" data-testid="stage-title">{stage.title}</motion.h1>
         </div>
         <div className="mr-20 flex items-center gap-1.5" aria-hidden>{stages.map((s, i) => <span key={s.id} className={`h-2 rounded-full transition-all ${i === index ? "w-6 bg-sky-400" : i < index ? "w-2 bg-slate-500" : "w-2 bg-slate-800"}`} />)}</div>
       </header>
-      <AnimatePresence mode="wait">
-        <motion.div key={stage.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}><Body /></motion.div>
-      </AnimatePresence>
+      {/* No exit animation: with mode="wait" the OLD stage stayed mounted for 250 ms, re-rendering (and re-running its effects) against the NEW stage's context. */}
+      <motion.div key={stage.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}><Body /></motion.div>
       <div className="fixed bottom-1 right-3 z-10 text-sm text-slate-600">{stage.hint}</div>
       {/* offline marker: tiny, and only shown in presenter mode (P) so the audience never sees it */}
       {presenterMode && checked && !online && <div className="fixed left-2 top-2 z-30 flex items-center gap-1 text-xs text-red-400" title="server offline: races play recorded streams" data-testid="offline-marker"><span className="h-2.5 w-2.5 rounded-full bg-red-500" />offline</div>}

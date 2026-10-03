@@ -16,7 +16,9 @@
     "prebuild": "node scripts/sync-data.mjs",
     "pretest": "node scripts/sync-data.mjs",
     "bench:inference": "tsx scripts/bench-inference.ts",
-    "e2e": "node e2e/mock-walkthrough.mjs"
+    "e2e": "node e2e/mock-walkthrough.mjs",
+    "e2e:perf": "node e2e/perf-regression.mjs",
+    "perf:probe": "node e2e/perf-probe.mjs"
   },
   "dependencies": {
     "@react-three/fiber": "^9.8.1",
