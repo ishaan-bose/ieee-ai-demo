@@ -49,27 +49,28 @@ class LoadedModel:
         self.search_depth_full_moves = cfg_doc["search_depth_full_moves"]
 
     @torch.no_grad()
-    def score(self, boards, stm, castle, ep) -> torch.Tensor:
+    def score(self, boards, stm, castle, ep, chunk: int | None = None) -> torch.Tensor:
         """Inputs: numpy arrays or tensors of N positions. Returns float32 cpu tensor (N,).
 
         Runs in FIXED-size fp32 chunks (padded), so a position's score never depends on its neighbours.
         """
+        chunk = chunk or EVAL_CHUNK
         t = [torch.as_tensor(a) for a in (boards, stm, castle, ep)]
         n = t[0].shape[0]
         out = []
         prev_tf32 = torch.backends.cuda.matmul.allow_tf32
         torch.backends.cuda.matmul.allow_tf32 = False  # fp32 for evaluation (SPEC 6.4)
         try:
-            for s in range(0, n, EVAL_CHUNK):
-                chunk = [x[s:s + EVAL_CHUNK] for x in t]
-                m = chunk[0].shape[0]
-                if m < EVAL_CHUNK:  # pad by repeating the first row
-                    chunk = [torch.cat([x, x[:1].expand(EVAL_CHUNK - m, *x.shape[1:])]) for x in chunk]
-                chunk = [x.to(self.device) for x in chunk]
-                z = self.model(E.encode(*chunk, self.extras))
+            for s in range(0, n, chunk):
+                part = [x[s:s + chunk] for x in t]
+                m = part[0].shape[0]
+                if m < chunk:  # pad by repeating the first row
+                    part = [torch.cat([x, x[:1].expand(chunk - m, *x.shape[1:])]) for x in part]
+                part = [x.to(self.device) for x in part]
+                z = self.model(E.encode(*part, self.extras))
                 pred = E.head_to_target_space(z, head=self.cfg["output_head"], target_type=self.cfg["target_type"],
                                               K=self.cfg["eval_squash_scale"], mate_clip=self.cfg["mate_clip"])
-                sc = E.score_cp_for_stm(pred, chunk[1], target_type=self.cfg["target_type"], K=self.cfg["eval_squash_scale"],
+                sc = E.score_cp_for_stm(pred, part[1], target_type=self.cfg["target_type"], K=self.cfg["eval_squash_scale"],
                                         mate_clip=self.cfg["mate_clip"], perspective_flip=self.cfg["perspective_flip"])
                 out.append(sc[:m].float().cpu())
         finally:

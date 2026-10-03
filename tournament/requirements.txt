@@ -1,1 +1,2 @@
-python-chess
+# Extra dependencies for the tournament (torch and numpy come from the server's own install: never pip-install them).
+python-chess>=1.10
