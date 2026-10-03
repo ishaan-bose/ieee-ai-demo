@@ -160,3 +160,11 @@ def test_lichess_loader_slices(fake_data_dir):
 def test_lichess_loader_on_real_samples():
     li = LichessData(SAMPLES_DIR / "lichess")
     assert li.n == 2000 and len(li.train_indices("all")) + len(li.val_indices()) == 2000
+
+
+def test_shared_config_defaults_file_is_current():
+    """frontend imports shared/config_defaults.json: it must match the backend (regenerate with scripts/make_golden.py)."""
+    from app.chess_net.config import DEFAULT_CONFIG, tier_table
+
+    d = json.loads((REPO_ROOT / "shared" / "config_defaults.json").read_text())
+    assert d["defaults"] == DEFAULT_CONFIG and d["tiers"] == tier_table()

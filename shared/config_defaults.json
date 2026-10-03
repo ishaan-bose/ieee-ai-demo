@@ -1,0 +1,205 @@
+{
+ "param_cases": [
+  {
+   "config": {},
+   "param_count": 329985,
+   "tier": "Light",
+   "in_dim": 773,
+   "matmul_params": 329216
+  },
+  {
+   "config": {
+    "layers": 4,
+    "width": 1024
+   },
+   "param_count": 3942401,
+   "tier": "Medium",
+   "in_dim": 773,
+   "matmul_params": 3938304
+  },
+  {
+   "config": {
+    "layer_widths": [
+     512,
+     256,
+     64
+    ],
+    "normalization": "layernorm"
+   },
+   "param_count": 545793,
+   "tier": "Light",
+   "in_dim": 773,
+   "matmul_params": 543296
+  },
+  {
+   "config": {
+    "layers": 6,
+    "width": 2048,
+    "input_extras": {
+     "attacks": true,
+     "material": true,
+     "en_passant": true
+    }
+   },
+   "param_count": 22867969,
+   "tier": "Heavy",
+   "in_dim": 919,
+   "matmul_params": 22855680
+  },
+  {
+   "config": {
+    "layers": 2,
+    "width": 8,
+    "input_extras": {
+     "stm_castle": false
+    }
+   },
+   "param_count": 6233,
+   "tier": "Light",
+   "in_dim": 768,
+   "matmul_params": 6216
+  },
+  {
+   "config": {
+    "layers": 7,
+    "width": 2048
+   },
+   "param_count": 26765313,
+   "tier": "Heavy",
+   "in_dim": 773,
+   "matmul_params": 26750976
+  }
+ ],
+ "defaults": {
+  "layers": 3,
+  "width": 256,
+  "layer_widths": null,
+  "activation": {
+   "name": "relu",
+   "alpha": 0.01,
+   "beta": 1.0,
+   "cap": 6.0
+  },
+  "loss": {
+   "name": "mse",
+   "delta": 1.0
+  },
+  "lr": 0.001,
+  "batch_size": 256,
+  "optimizer": "adam",
+  "target_type": "winprob",
+  "eval_squash_scale": 400.0,
+  "mate_clip": 2000.0,
+  "input_extras": {
+   "stm_castle": true,
+   "en_passant": false,
+   "material": false,
+   "attacks": false
+  },
+  "perspective_flip": true,
+  "color_flip_augmentation": false,
+  "data_slice": "all",
+  "sampling": "uniform",
+  "init": "xavier",
+  "lr_schedule": "constant",
+  "warmup_frac": 0.0,
+  "grad_clip": 0.0,
+  "ema": {
+   "enabled": false,
+   "decay": 0.999
+  },
+  "normalization": "none",
+  "residual": false,
+  "output_head": "linear",
+  "seed": 0
+ },
+ "tiers": [
+  {
+   "name": "Light",
+   "max_params": 1500000,
+   "search_depth_full_moves": 3
+  },
+  {
+   "name": "Medium",
+   "max_params": 8000000,
+   "search_depth_full_moves": 2
+  },
+  {
+   "name": "Heavy",
+   "max_params": 30000000,
+   "search_depth_full_moves": 1
+  }
+ ],
+ "max_params": 30000000,
+ "max_layers": 16,
+ "width_range": [
+  8,
+  8192
+ ],
+ "activations": [
+  "relu",
+  "leaky_relu",
+  "sigmoid",
+  "tanh",
+  "gelu",
+  "swish",
+  "softplus",
+  "elu",
+  "clipped_relu",
+  "hard_step"
+ ],
+ "ranges": {
+  "layers": {
+   "minimum": 1,
+   "maximum": 16
+  },
+  "width": {
+   "minimum": 8,
+   "maximum": 8192
+  },
+  "layer_widths": {},
+  "activation": {},
+  "loss": {},
+  "lr": {
+   "minimum": 1e-06,
+   "maximum": 1.0
+  },
+  "batch_size": {
+   "minimum": 1,
+   "maximum": 16384
+  },
+  "optimizer": {},
+  "target_type": {},
+  "eval_squash_scale": {
+   "minimum": 50.0,
+   "maximum": 2000.0
+  },
+  "mate_clip": {
+   "minimum": 300.0,
+   "maximum": 10000.0
+  },
+  "input_extras": {},
+  "perspective_flip": {},
+  "color_flip_augmentation": {},
+  "data_slice": {},
+  "sampling": {},
+  "init": {},
+  "lr_schedule": {},
+  "warmup_frac": {
+   "minimum": 0.0,
+   "maximum": 0.5
+  },
+  "grad_clip": {
+   "minimum": 0.0,
+   "maximum": 100.0
+  },
+  "ema": {},
+  "normalization": {},
+  "residual": {},
+  "output_head": {},
+  "seed": {
+   "minimum": 0,
+   "maximum": 2147483647
+  }
+ }
+}

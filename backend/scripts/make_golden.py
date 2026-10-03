@@ -81,8 +81,28 @@ def inference_fixture() -> dict:
     return {"tolerance": 1e-4, "models": models}
 
 
+def config_defaults_fixture() -> dict:
+    """Defaults, ranges and the tier table, so the /build form works offline and agrees with the server."""
+    from app.chess_net.config import DEFAULT_CONFIG, MAX_LAYERS, MAX_PARAMS, MAX_WIDTH, MIN_WIDTH, CompetitionConfig, tier_table
+    from app.activations import ACTIVATION_NAMES
+
+    from app.chess_net.config import resolve_config
+
+    cases = []
+    for raw in ({}, {"layers": 4, "width": 1024}, {"layer_widths": [512, 256, 64], "normalization": "layernorm"},
+                {"layers": 6, "width": 2048, "input_extras": {"attacks": True, "material": True, "en_passant": True}},
+                {"layers": 2, "width": 8, "input_extras": {"stm_castle": False}}, {"layers": 7, "width": 2048}):
+        r, e = resolve_config(raw)
+        cases.append({"config": raw, "param_count": r["param_count"], "tier": r["tier"], "in_dim": r["in_dim"], "matmul_params": r["matmul_params"]})
+    props = CompetitionConfig.model_json_schema()["properties"]
+    return {"param_cases": cases, "defaults": DEFAULT_CONFIG, "tiers": tier_table(), "max_params": MAX_PARAMS, "max_layers": MAX_LAYERS,
+            "width_range": [MIN_WIDTH, MAX_WIDTH], "activations": list(ACTIVATION_NAMES),
+            "ranges": {k: {a: v[a] for a in ("minimum", "maximum") if a in v} for k, v in props.items()}}
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
+    (ROOT / "shared" / "config_defaults.json").write_text(json.dumps(config_defaults_fixture(), indent=1))
     (OUT / "inference.json").write_text(json.dumps(inference_fixture(), separators=(",", ":")))
     (OUT / "rasterizer.json").write_text(json.dumps(rasterizer_fixture(), separators=(",", ":")))
     (OUT / "audio.json").write_text(json.dumps(audio_fixture(), separators=(",", ":")))

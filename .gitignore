@@ -17,3 +17,4 @@ checkpoints/
 frontend/public/models/
 frontend/public/cache/
 frontend/public/data/
+e2e-fail-*.png
