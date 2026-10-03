@@ -8,14 +8,14 @@
 #   ./scripts/run_on_server.sh --only benchmark
 #   ./scripts/run_on_server.sh --skip tests --skip contract
 #
-# Stages, in order: deps selfcheck contract tests rasterize benchmark showcase races export house pack
+# Stages, in order: deps selfcheck contract tests rasterize benchmark showcase races export browserbench house pack
 # Every stage is idempotent (finished work is skipped), so after a failure fix the problem and run the same command again.
 # Logs: ~/demo/logs/<stage>.log ; summary lines: ~/demo/logs/run_on_server_summary.txt
 set -u -o pipefail
 cd "$(dirname "$0")/.."
 export PYTHONUNBUFFERED=1
 
-STAGES=(deps selfcheck contract tests rasterize benchmark showcase races export house pack)
+STAGES=(deps selfcheck contract tests rasterize benchmark showcase races export browserbench house pack)
 QUICK=""; FROM=""; ONLY=""; SKIP=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -65,6 +65,7 @@ print("torch", torch.__version__, "| cuda", torch.cuda.is_available(), "|", torc
 PY
   cat "$SUMMARY"
   [ -f "$LOG_DIR/benchmark_report.txt" ] && echo "(full benchmark report: $LOG_DIR/benchmark_report.txt  -> paste that separately)"
+  [ -f "$LOG_DIR/benchmark_browser.txt" ] && echo "(browser inference timing: $LOG_DIR/benchmark_browser.txt)"
   echo "==================================================="
 }
 
@@ -84,10 +85,11 @@ stage_tests() {
   python3 -m pytest -x -p no:warnings -o addopts="" -q
 }
 stage_rasterize() { python3 scripts/rasterize_quickdraw.py; }
-stage_benchmark() { python3 scripts/benchmark.py $QUICK; }
+stage_benchmark() { python3 scripts/benchmark.py $QUICK --sections 1,2,3,4,5,6; }
 stage_showcase() { python3 scripts/train_showcase.py $QUICK; }
 stage_races() { python3 scripts/record_races.py $QUICK; }
 stage_export() { python3 scripts/export_weights.py; }
+stage_browserbench() { python3 scripts/benchmark.py $QUICK --sections 7; }  # needs the exported models (and node; otherwise it tells you to run it on the laptop)
 stage_house() { python3 scripts/train_house_net.py $QUICK; }
 stage_pack() {
   local out="${ARTIFACTS:-$HOME/demo/artifacts.tgz}"

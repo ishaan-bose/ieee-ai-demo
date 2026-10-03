@@ -409,7 +409,7 @@ SECTIONS = {1: section1, 2: section2, 3: section3, 4: section4, 5: section5, 6: 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--quick", action="store_true")
-    ap.add_argument("--sections", default="1,2,3,4,5,6,7")
+    ap.add_argument("--sections", default="1,2,3,4,5,6,7", help="comma list; run_on_server.sh runs 1-6 first and 7 after the models are exported")
     ap.add_argument("--calib-seconds", type=float, default=30.0)
     ap.add_argument("--strength-seconds", type=float, default=120.0)
     ap.add_argument("--games", type=int, default=6)
@@ -437,8 +437,9 @@ def main(argv=None) -> int:
         c.out("   " + v)
     c.out(f"total time {time.time() - t0:.0f}s")
     c.out("=" * 72)
-    (c.s.log_dir / "benchmark_report.txt").write_text("\n".join(c.lines) + "\n")
-    print(f"(report saved to {c.s.log_dir / 'benchmark_report.txt'})")
+    name = "benchmark_browser.txt" if a.sections.strip() == "7" else "benchmark_report.txt"
+    (c.s.log_dir / name).write_text("\n".join(c.lines) + "\n")
+    print(f"(report saved to {c.s.log_dir / name})")
     return 0
 
 

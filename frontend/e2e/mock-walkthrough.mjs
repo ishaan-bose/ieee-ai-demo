@@ -116,6 +116,18 @@ await check("Act 3: sample clips, step view, live mic (fake device) records", as
   must(/your recording/.test(name) || await page.getByTestId("mic-error").count() > 0, "neither a recording nor a clean mic error: " + name);
 });
 
+await check("Act 3 mic failure drill: no microphone -> clear message and the sample clips keep working", async () => {
+  const b3 = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined }); // no fake device: getUserMedia fails
+  const p3 = await b3.newPage({ viewport: { width: 1600, height: 900 } });
+  await p3.goto(`${BASE}/?mock=1&stage=a3-preprocess`); await p3.waitForTimeout(1200);
+  await p3.getByTestId("ptt").dispatchEvent("pointerdown"); await p3.waitForTimeout(600); await p3.getByTestId("ptt").dispatchEvent("pointerup");
+  await p3.getByTestId("mic-error").waitFor({ timeout: 4000 });
+  const name = await p3.getByTestId("clip-name").innerText();
+  await p3.getByTestId("spectrogram").waitFor();
+  await b3.close();
+  must(/clip \d+\/20/.test(name), "did not fall back to a sample clip: " + name);
+});
+
 await check("Act 3 trap reveals confusion matrix, recall and the fix; overfitting slider works", async () => {
   await goto("a3-trap");
   await space(); await page.getByTestId("confusion").waitFor();
