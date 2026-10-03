@@ -32,7 +32,9 @@ QUICKDRAW_SAMPLES_PER_CLASS = 5  # samples.json: 50 records from val
 QUICKDRAW_REAL_COUNTS = {"train": 1_090_830, "val": 25_106, "pool": 2_579}
 # Google's "simplified" coordinates are only approximately normalized: in the
 # real samples ~24% of drawings start at 1-2 instead of 0, or span 253-254
-# instead of 255 (see NOTES.md). Allowed slack, in pixels:
+# instead of 255, and on the full data some drawings span much less than 255
+# ("larger side spans N"). These are KNOWN and ACCEPTED (owner decision): they are
+# reported as statistics in `stats`, never as failures. The rasterizer re-normalizes.
 QUICKDRAW_NORM_TOL = 3
 
 SPEECH_CLASSES = ["yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go", "marvin"]
@@ -93,7 +95,13 @@ def _load_json(path: Path, problems: list[str]):
 
 # ---------------------------------------------------------------- Quick, Draw!
 
-def check_quickdraw_record(r, where: str = "") -> list[str]:
+def _bump(stats: dict | None, key: str, n: int = 1) -> None:
+    if stats is not None:
+        stats[key] = stats.get(key, 0) + n
+
+
+def check_quickdraw_record(r, where: str = "", stats: dict | None = None) -> list[str]:
+    """Hard structural checks; normalization imperfections only update `stats`."""
     p: list[str] = []
     if not isinstance(r, dict) or set(r) != {"c", "k", "d"}:
         return [f"{where}: record must be an object with exactly keys c, k, d"]
@@ -120,26 +128,33 @@ def check_quickdraw_record(r, where: str = "") -> list[str]:
         xs_all += xs
         ys_all += ys
     if xs_all and not p:
+        _bump(stats, "records")
         tol = QUICKDRAW_NORM_TOL
+        if min(xs_all) > 0 or min(ys_all) > 0:
+            _bump(stats, "not_exactly_top_left")
         if min(xs_all) > tol or min(ys_all) > tol:
-            p.append(f"{where}: not aligned to top-left (min x {min(xs_all)}, min y {min(ys_all)})")
+            _bump(stats, "not_aligned_top_left_beyond_tol")
         extent = max(max(xs_all) - min(xs_all), max(ys_all) - min(ys_all))
+        if extent != 255:
+            _bump(stats, "larger_side_not_255")
         if extent < 255 - tol:
-            p.append(f"{where}: larger side spans {extent}, expected ~255")
+            _bump(stats, "larger_side_spans_less_than_252")
+            if stats is not None:
+                stats["min_larger_side"] = min(stats.get("min_larger_side", 255), extent)
     return p
 
 
-def _check_records(records, where: str, max_problems: int = 20) -> list[str]:
+def _check_records(records, where: str, max_problems: int = 20, stats: dict | None = None) -> list[str]:
     p: list[str] = []
     for i, r in enumerate(records):
-        p += check_quickdraw_record(r, f"{where}[{i}]")
+        p += check_quickdraw_record(r, f"{where}[{i}]", stats)
         if len(p) >= max_problems:
             p.append(f"{where}: stopping after {max_problems} problems")
             break
     return p
 
 
-def check_quickdraw_json_arrays(dir_: Path, strict_split: bool = True) -> list[str]:
+def check_quickdraw_json_arrays(dir_: Path, strict_split: bool = True, stats: dict | None = None) -> list[str]:
     """classes.json, duel.json, probe.json, samples.json (present in both layouts)."""
     p: list[str] = []
     classes = _load_json(dir_ / "classes.json", p)
@@ -155,17 +170,17 @@ def check_quickdraw_json_arrays(dir_: Path, strict_split: bool = True) -> list[s
 
     duel = _load_json(dir_ / "duel.json", p)
     if duel is not None:
-        p += _check_records(duel, "duel.json")
+        p += _check_records(duel, "duel.json", stats=stats)
         if counts(duel) != [QUICKDRAW_DUEL_PER_CLASS] * 10:
             p.append(f"duel.json class counts {counts(duel)}, expected {QUICKDRAW_DUEL_PER_CLASS} each")
     probe = _load_json(dir_ / "probe.json", p)
     if probe is not None:
-        p += _check_records(probe, "probe.json")
+        p += _check_records(probe, "probe.json", stats=stats)
         if len(probe) != QUICKDRAW_PROBE_N or min(counts(probe)) < 1:
             p.append(f"probe.json must have {QUICKDRAW_PROBE_N} records covering every class, got {counts(probe)}")
     samples = _load_json(dir_ / "samples.json", p)
     if samples is not None:
-        p += _check_records(samples, "samples.json")
+        p += _check_records(samples, "samples.json", stats=stats)
         if counts(samples) != [QUICKDRAW_SAMPLES_PER_CLASS] * 10:
             p.append(f"samples.json class counts {counts(samples)}, expected {QUICKDRAW_SAMPLES_PER_CLASS} each")
 
@@ -182,7 +197,7 @@ def check_quickdraw_json_arrays(dir_: Path, strict_split: bool = True) -> list[s
 
 
 def check_quickdraw_jsonl(path: Path, split: str, max_records: int | None = None,
-                          expected_lines: int | None = None) -> list[str]:
+                          expected_lines: int | None = None, stats: dict | None = None) -> list[str]:
     """Validate a JSONL split. max_records limits full parsing (lines are still counted)."""
     p: list[str] = []
     if not path.is_file():
@@ -198,7 +213,7 @@ def check_quickdraw_jsonl(path: Path, split: str, max_records: int | None = None
                     p.append(f"{path.name} line {n + 1}: invalid JSON")
                     r = None
                 if r is not None:
-                    rp = check_quickdraw_record(r, f"{path.name} line {n + 1}")
+                    rp = check_quickdraw_record(r, f"{path.name} line {n + 1}", stats)
                     if not rp and quickdraw_split_of(r["k"]) != split:
                         rp.append(f"{path.name} line {n + 1}: key {r['k']} hashes into split "
                                   f"{quickdraw_split_of(r['k'])}, not {split}")
@@ -218,12 +233,13 @@ def check_quickdraw_jsonl(path: Path, split: str, max_records: int | None = None
     return p
 
 
-def check_quickdraw_processed(dir_: Path, real: bool = False, max_records: int | None = None) -> list[str]:
+def check_quickdraw_processed(dir_: Path, real: bool = False, max_records: int | None = None,
+                              stats: dict | None = None) -> list[str]:
     """The DATA_DIR/quickdraw/processed layout (fake or real)."""
-    p = check_quickdraw_json_arrays(dir_)
+    p = check_quickdraw_json_arrays(dir_, stats=stats)
     for split in QUICKDRAW_SPLITS:
         expected = QUICKDRAW_REAL_COUNTS[split] if real else None
-        p += check_quickdraw_jsonl(dir_ / f"{split}.jsonl", split, max_records, expected)
+        p += check_quickdraw_jsonl(dir_ / f"{split}.jsonl", split, max_records, expected, stats)
     return p
 
 
@@ -347,7 +363,8 @@ def check_speech_processed(dir_: Path, real: bool = False) -> list[str]:
 
 # ---------------------------------------------------------------- Lichess
 
-def check_lichess(dir_: Path, real: bool = False, expected_n: int | None = None) -> list[str]:
+def check_lichess(dir_: Path, real: bool = False, expected_n: int | None = None,
+                  stats: dict | None = None) -> list[str]:
     """The DATA_DIR/lichess layout (fake, data/samples/lichess, or real)."""
     p: list[str] = []
     arrays: dict[str, np.ndarray] = {}
@@ -396,7 +413,9 @@ def check_lichess(dir_: Path, real: bool = False, expected_n: int | None = None)
         back = np.concatenate([b[:, :8], b[:, 56:]], axis=1)
         fail("pawn on rank 1 or 8", ((back == LICHESS_WHITE_PAWN) | (back == LICHESS_BLACK_PAWN)).any(axis=1), start)
         fail("npc != number of pieces on the board", (b > 0).sum(axis=1) != npc, start)
-        fail("mat != white minus black material", LICHESS_MATERIAL[np.minimum(b, 12)].sum(axis=1) != mat, start)
+        # Known and accepted: the stored `mat` can disagree with the boards. Reported as a
+        # statistic only; all code computes material from the boards array.
+        _bump(stats, "mat_mismatch_rows", int((LICHESS_MATERIAL[np.minimum(b, 12)].sum(axis=1) != mat).sum()))
         fail("stm not in {0,1}", stm > 1, start)
         fail("castle not in 0..15", castle > 15, start)
         fail("ep not in -1..7", (ep < -1) | (ep > 7), start)
@@ -409,6 +428,9 @@ def check_lichess(dir_: Path, real: bool = False, expected_n: int | None = None)
         if len(p) >= 20:
             p.append("stopping after 20 problems")
             break
+    if stats is not None:
+        stats["rows"] = n
+        stats["validation_rows"] = n_val
     if real and n_val != LICHESS_REAL_VAL:
         p.append(f"{n_val} validation rows, expected {LICHESS_REAL_VAL}")
     if n >= 100 and not 0.005 <= n_val / n <= 0.05:
@@ -418,13 +440,20 @@ def check_lichess(dir_: Path, real: bool = False, expected_n: int | None = None)
 
 # ---------------------------------------------------------------- whole DATA_DIR
 
-def check_data_dir(data_dir: Path, real: bool = False, max_records: int | None = None) -> dict[str, list[str]]:
-    """Check the full DATA_DIR layout. Returns {dataset: problems}."""
+def check_data_dir(data_dir: Path, real: bool = False, max_records: int | None = None,
+                   stats: dict | None = None) -> dict[str, list[str]]:
+    """Check the full DATA_DIR layout. Returns {dataset: problems}.
+
+    Pass a dict as `stats` to receive per-dataset statistics (accepted imperfections).
+    """
     data_dir = Path(data_dir)
+    st = stats if stats is not None else {}
+    st.setdefault("quickdraw", {})
+    st.setdefault("lichess", {})
     return {
-        "quickdraw": check_quickdraw_processed(data_dir / "quickdraw" / "processed", real, max_records),
+        "quickdraw": check_quickdraw_processed(data_dir / "quickdraw" / "processed", real, max_records, st["quickdraw"]),
         "speech": check_speech_processed(data_dir / "speech" / "processed", real),
-        "lichess": check_lichess(data_dir / "lichess", real),
+        "lichess": check_lichess(data_dir / "lichess", real, stats=st["lichess"]),
     }
 
 
@@ -452,13 +481,17 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     data_dir = args.data_dir or get_settings().data_dir
     print(f"Checking {data_dir} (real counts: {args.real})")
-    results = check_data_dir(data_dir, args.real, args.max_records)
+    stats: dict = {}
+    results = check_data_dir(data_dir, args.real, args.max_records, stats)
     ok = True
     for name, problems in results.items():
         print(f"{'PASS' if not problems else 'FAIL'} {name}")
         for prob in problems:
             print(f"    - {prob}")
         ok = ok and not problems
+    print("Statistics (known/accepted imperfections, never failures):")
+    for ds, st in stats.items():
+        print(f"    {ds}: {json.dumps(st, sort_keys=True)}")
     print("ALL PASS" if ok else "SOME CHECKS FAILED")
     return 0 if ok else 1
 

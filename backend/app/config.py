@@ -57,6 +57,7 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
 class Settings:
     data_dir: Path
     state_dir: Path
+    log_dir: Path
     num_workers: int
     port: int
     admin_token: str | None = field(repr=False)
@@ -82,6 +83,7 @@ def get_settings() -> Settings:
     return Settings(
         data_dir=_env_path("DATA_DIR", "~/demo/data"),
         state_dir=_env_path("STATE_DIR", "~/demo/state"),
+        log_dir=_env_path("LOG_DIR", "~/demo/logs"),
         num_workers=_env_int("NUM_WORKERS", 4),
         port=_env_int("BACKEND_PORT", 8000),
         admin_token=os.environ.get("ADMIN_TOKEN") or None,
