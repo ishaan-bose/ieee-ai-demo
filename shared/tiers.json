@@ -1,0 +1,8 @@
+{
+  "_note": "PLACEHOLDER thresholds (SPEC 8.5). backend/scripts/benchmark.py suggests values from measured search speed; edit here. Depth is in FULL moves (internal plies = 2 x full moves).",
+  "tiers": [
+    {"name": "Light", "max_params": 1500000, "search_depth_full_moves": 3},
+    {"name": "Medium", "max_params": 8000000, "search_depth_full_moves": 2},
+    {"name": "Heavy", "max_params": 30000000, "search_depth_full_moves": 1}
+  ]
+}
