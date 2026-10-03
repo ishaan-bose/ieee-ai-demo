@@ -1,0 +1,9 @@
+# Backend dependencies for the server and the laptop.
+#
+# DO NOT add torch here. The server has NVIDIA's PyTorch build preinstalled
+# (SPEC 0.1); `pip install torch` would replace it.
+# numpy is listed without a version on purpose: the server already has the one
+# that matches its torch build, and pip leaves an installed package alone.
+fastapi>=0.110
+uvicorn>=0.29
+numpy

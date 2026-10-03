@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+markers = [
+    "real_data: checks the real files under DATA_DIR (opt in with REAL_DATA=1; run on the server)",
+]
