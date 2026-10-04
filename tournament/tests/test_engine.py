@@ -136,7 +136,12 @@ def test_games_pgn_roundtrip_and_determinism():
     g2 = play_game(SearchPlayer("mat", Searcher(MaterialEvaluator(), 2)), RandomPlayer(), OPENINGS[0], max_plies=70)
     assert g1.moves == g2.moves and g1.pgn() == g2.pgn()  # no randomness anywhere
     pg = chess.pgn.read_game(io.StringIO(g1.pgn()))
-    assert [m.uci() for m in pg.mainline_moves()] == g1.moves and pg.headers["Result"] == g1.result
+    n = len(OPENINGS[0][1])
+    assert [m.uci() for m in pg.mainline_moves()] == g1.moves[n:] and pg.headers["Result"] == g1.result  # the movetext starts at the opening position (FEN tag)
+    b = chess.Board()
+    for u in g1.moves[:n]:
+        b.push_uci(u)
+    assert pg.headers["SetUp"] == "1" and pg.headers["FEN"] == b.fen() == g1.start_fen
     assert g1.moves[: len(OPENINGS[0][1])] == OPENINGS[0][1] and g1.san_moves()[0] == "e4"
     assert g1.score_for("mat") in (0.0, 0.5, 1.0) and g1.score_for("mat") + g1.score_for("random") == 1.0
 

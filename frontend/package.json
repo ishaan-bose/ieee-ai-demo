@@ -18,7 +18,8 @@
     "bench:inference": "tsx scripts/bench-inference.ts",
     "e2e": "node e2e/mock-walkthrough.mjs",
     "e2e:perf": "node e2e/perf-regression.mjs",
-    "perf:probe": "node e2e/perf-probe.mjs"
+    "perf:probe": "node e2e/perf-probe.mjs",
+    "e2e:act4": "node e2e/act4-layout.mjs"
   },
   "dependencies": {
     "@react-three/fiber": "^9.8.1",
@@ -38,7 +39,9 @@
     "@types/react-dom": "^19.3.0",
     "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "jsqr": "^1.4.0",
     "playwright": "^1.63.0",
+    "pngjs": "^7.0.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

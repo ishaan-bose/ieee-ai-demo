@@ -204,3 +204,20 @@ browsers other than Chromium, projector scaling, Windows laptop commands, the se
 - **Dev builds are ~2x slower than production** (React dev mode + StrictMode renders everything twice); the gate's 200 ms limit passes on both.
 - `real-backend-smoke.mjs` can fail its "live" check right after the backend starts (the first race pays PyTorch's cold-start cost, more than the 15 s it
   waits). Start the backend and run one race by hand first, or just re-run.
+
+## Finale, favicon and tournament PGN (tasks 1-3)
+
+- **Act 4 close.** Stat boxes size to their content (`min-w-[300px]`, nowrap, padding), "3.6P FLOPs" has a space, the QR card and the yellow line sit lower in a
+  single column. The QR encodes exactly `https://ieeecspesu.vercel.app` (constant `CLUB_URL` in `Act4.tsx`; `BOOTH_URL`/`VITE_BOOTH_URL` were removed). `npm run e2e:act4`
+  checks bounding boxes at 1920x1080 and 1600x900 with small, large and huge values and DECODES the QR from a screenshot (jsQR, pngjs; devDependencies). Screenshots go to
+  `frontend/e2e/out/` (git-ignored). Also fixed on the way: the demo shell used `min-h-screen` inside the fit-zoom, so at 1080p (zoom 1.2) every stage was 1.2x taller than the
+  window (a vertical scrollbar); it now uses `minHeight: 100/scale vh`. In mock mode `window.__byoai.set(...)` lets the test put big numbers in the session stats.
+- **Favicon.** The only logo candidate on main was `ieee-cs.png` (400x400, repo root, commit "Added IEEE CS logo"). Copied to `frontend/public/ieee-cs.png`; 32x32
+  (`favicon-32.png`) and 180x180 (`apple-touch-icon.png`) were produced with a Chromium canvas (no ImageMagick/PIL here). The old `favicon.svg` was removed. Title unchanged.
+- **Tournament PGN.** Names come from the model folder's `config.json` (`model_name`, `nickname`), no database needed and no contact data ever present: `Bot Name (submitter)`;
+  `house-net` -> `House Net (IEEE CS)`; `default-config` -> `Default Config (reference)`; bots -> `Random Bot (reference)`, `Material Bot (reference)`,
+  `Stockfish depth N (reference)`. Duplicates get ` #2`, ` #3`. Control characters, quotes and backslashes are stripped. Tags: Event, Site, Date `????.??.??`, Round `r.n`,
+  White, Black, Result, SetUp/FEN (the opening position: the movetext starts there), Opening, Termination (checkmate, stalemate, repetition, 50-move, insufficient material,
+  adjudicated, forfeit), WhiteDepth/BlackDepth (full moves; the random mover is 0). No time tags or comments anywhere. After EVERY round the CLI writes `round_NN.pgn`,
+  the cumulative `games.pgn` and `results.json` atomically (tmp + rename); old `round_*.pgn` from a previous longer run are removed at the start. The top-8 bracket games are
+  in `bracket.json` only (not PGN), as before.

@@ -160,7 +160,8 @@ def test_too_many_rounds_and_too_few_models(models_dir, tmp_path, capsys):
 
 # ---------------------------------------------------------------- the real thing, end to end
 def read_outputs(out: Path):
-    return {n: (out / n).read_bytes() for n in ("games.pgn", "ratings.json", "standings.csv", "results.json", "sanity.json")}
+    names = ["games.pgn", "ratings.json", "standings.csv", "results.json", "sanity.json"] + sorted(p.name for p in out.glob("round_*.pgn"))
+    return {n: (out / n).read_bytes() for n in names}
 
 
 def test_full_tournament_repeat_runs_are_identical(models_dir, tmp_path):
@@ -210,3 +211,123 @@ def test_the_api_server_never_imports_the_tournament():
     code = "import sys; import app.main; print(any(m == 'tournament' or m.startswith('tournament.') for m in sys.modules))"
     out = subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).resolve().parents[2] / "backend", capture_output=True, text=True)
     assert out.stdout.strip() == "False", out.stderr
+
+
+# ---------------------------------------------------------------- PGN output
+SLOW = ["--depth-override-plies", "2", "--max-plies", "40", "--no-bracket", "--override-sanity"]
+FORBIDDEN = ("UTCDate", "UTCTime", "TimeControl", "Time", "WhiteClock", "BlackClock", "WhiteTimeLeft", "BlackTimeLeft", "StartTime", "EndTime", "Clock")
+
+
+def run_pgn_tournament(models_dir, tmp_path, name="o", rounds="3", extra=()):
+    out = tmp_path / name
+    assert trun.main(["--rounds", rounds, "--out", str(out), "--models-dir", str(models_dir), "--state-dir", str(tmp_path / "s")] + SLOW + list(extra)) == 0
+    return out
+
+
+def read_games(path: Path):
+    import io
+    import chess.pgn
+    text = path.read_text()
+    f, games = io.StringIO(text), []
+    while (g := chess.pgn.read_game(f)) is not None:
+        games.append(g)
+    return text, games
+
+
+def test_pgn_headers_names_and_no_time_data(models_dir, tmp_path):
+    make_fake_model(models_dir / "house-net", seed=7, nickname="House Net", model_name="House Net")
+    out = run_pgn_tournament(models_dir, tmp_path, rounds="3")
+    text, games = read_games(out / "games.pgn")
+    assert games and text.count("[Event ") == len(games)
+    names = set()
+    for g in games:
+        h = g.headers
+        for tag in ("Event", "Site", "Round", "White", "Black", "Result", "SetUp", "FEN", "Termination", "WhiteDepth", "BlackDepth"):
+            assert tag in h, tag
+        assert h["Date"] == "????.??.??" and h["SetUp"] == "1"
+        assert h["Termination"] in {"checkmate", "stalemate", "repetition", "50-move", "insufficient material", "adjudicated", "forfeit"}
+        assert not any(t in h for t in FORBIDDEN) and not any(k.startswith(("UTC", "Time", "Clock")) for k in h.keys())
+        assert chess.Board(h["FEN"]).is_valid() and g.board().fen() == h["FEN"]  # the movetext starts from the opening position
+        assert all(not n.comment for n in g.mainline())  # no clock/time comments
+        names |= {h["White"], h["Black"]}
+    assert "{" not in text and "%clk" not in text
+    assert {"Net0 (p0)", "Net3 (p3)", "House Net (IEEE CS)", "Random Bot (reference)"} <= names
+    for n in names:
+        assert n.endswith(")") and " (" in n  # always 'Bot Name (submitter)'
+    # depth tags: the nets searched 2 plies = 1 full move, the random mover does not search
+    for g in games:
+        for side, expected in (("White", g.headers["White"]), ("Black", g.headers["Black"])):
+            want = "0" if expected.startswith("Random") else "1"
+            assert g.headers[f"{side}Depth"] == want, (expected, g.headers[f"{side}Depth"])
+    assert 'Round "1.1"' in text
+
+
+def test_pgn_never_contains_contact_details_and_sanitises_names(tmp_path):
+    from tournament.run import pgn_player_name
+    assert pgn_player_name("sub1", {"model_name": 'Evil "Net"\n[x]', "nickname": "bob\\ the  builder", "contact": "bob@example.com"}) == "Evil Net [x] (bob the builder)"
+    assert pgn_player_name("sub2", {"model_name": "M", "nickname": ""}) == "M (anonymous)"
+    assert pgn_player_name("house-net", {"model_name": "x"}) == "House Net (IEEE CS)"
+    assert pgn_player_name("default-config", {"participant_code": "DEFAULT"}) == "Default Config (reference)"
+    d = tmp_path / "models"
+    for i in range(4):
+        make_fake_model(d / f"s{i}", seed=i, nickname=f"p{i}", model_name=f"Net{i}")
+    cfg = d / "s0" / "config.json"
+    doc = json.loads(cfg.read_text()); doc["contact"] = "secret@example.com"; doc["participant_code"] = "ABC123"; cfg.write_text(json.dumps(doc))
+    out = run_pgn_tournament(d, tmp_path, rounds="2")
+    blob = "".join(p.read_text() for p in out.glob("*.pgn")) + (out / "results.json").read_text() + (out / "standings.csv").read_text()
+    assert "secret@example.com" not in blob and "ABC123" not in blob
+
+
+def test_duplicate_bot_and_submitter_names_stay_distinguishable(tmp_path):
+    d = tmp_path / "models"
+    for i in range(4):
+        make_fake_model(d / f"s{i}", seed=i, nickname="same", model_name="Same Net")
+    out = run_pgn_tournament(d, tmp_path, rounds="2")
+    _, games = read_games(out / "games.pgn")
+    names = {g.headers["White"] for g in games} | {g.headers["Black"] for g in games}
+    assert {"Same Net (same)", "Same Net (same) #2", "Same Net (same) #3", "Same Net (same) #4"} <= names
+
+
+def test_every_round_writes_its_own_pgn_and_refreshes_the_cumulative_file(models_dir, tmp_path):
+    out = run_pgn_tournament(models_dir, tmp_path, rounds="3")
+    rounds = sorted(out.glob("round_*.pgn"))
+    assert [p.name for p in rounds] == ["round_01.pgn", "round_02.pgn", "round_03.pgn"]
+    for k, p in enumerate(rounds, 1):
+        _, gs = read_games(p)
+        assert gs and all(g.headers["Round"].startswith(f"{k}.") for g in gs)
+    assert "".join(p.read_text() for p in rounds) == (out / "games.pgn").read_text()
+    assert not list(out.glob("*.tmp"))
+    # stale round files from an earlier, longer run are removed
+    (out / "round_09.pgn").write_text("stale")
+    out2 = run_pgn_tournament(models_dir, tmp_path, name="o", rounds="2")
+    assert not (out2 / "round_09.pgn").exists() and (out2 / "round_02.pgn").exists() and not (out2 / "round_03.pgn").exists()
+
+
+def test_a_crash_after_round_two_loses_nothing(models_dir, tmp_path, monkeypatch):
+    seen = {}
+    real = trun.run_swiss
+
+    def spy(*a, **kw):
+        user = kw["on_round"]
+
+        def on_round(r, rg, allg):
+            user(r, rg, allg)
+            seen[r] = (len(rg), len(allg), sorted(p.name for p in (tmp_path / "o").glob("round_*.pgn")))
+            if r == 2:
+                raise KeyboardInterrupt  # the machine dies in the middle of the tournament
+        kw["on_round"] = on_round
+        return real(*a, **kw)
+
+    monkeypatch.setattr(trun, "run_swiss", spy)
+    with pytest.raises(KeyboardInterrupt):
+        trun.main(["--rounds", "3", "--out", str(tmp_path / "o"), "--models-dir", str(models_dir), "--state-dir", str(tmp_path / "s")] + SLOW)
+    assert seen[1][2] == ["round_01.pgn"] and seen[2][2] == ["round_01.pgn", "round_02.pgn"]  # each file existed as soon as its round ended
+    _, games = read_games(tmp_path / "o" / "games.pgn")
+    assert len(games) == seen[2][1]  # the cumulative file already holds both rounds
+    assert not (tmp_path / "o" / "round_03.pgn").exists()
+
+
+def test_pgn_files_are_byte_identical_across_runs(models_dir, tmp_path):
+    outs = [read_outputs(run_pgn_tournament(models_dir, tmp_path, name=f"r{k}", rounds="3")) for k in range(2)]
+    assert outs[0] == outs[1]
+    assert {"round_01.pgn", "round_02.pgn", "round_03.pgn", "games.pgn"} <= set(outs[0])

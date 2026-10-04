@@ -42,7 +42,7 @@ function Shell() {
   const { stage, index, stages, presenterMode } = useStage();
   const { online, checked } = useHealth();
   return (
-    <main style={{ zoom: scale }} className="relative min-h-screen overflow-hidden bg-slate-950 px-10 pb-16 pt-6 text-slate-100">
+    <main style={{ zoom: scale, minHeight: `${100 / scale}vh` }} className="relative overflow-hidden bg-slate-950 px-10 pb-16 pt-6 text-slate-100">
       <header className="mb-5 flex items-end justify-between">
         <div>
           <div className="text-lg uppercase tracking-widest text-sky-400">Act {stage.act}</div>

@@ -184,8 +184,8 @@ which is the tunnel. (`/admin` itself, opened in the browser, is the admin *page
 phone (same Wi-Fi). The phone follows whichever stage the laptop is on. This exposes the dev server on your Wi-Fi: use it on a
 trusted network and switch it back to plain `npm run dev` afterwards. In the same browser, a second tab on `/presenter` works too.
 
-**Booth QR code:** the finale shows a QR code for `http://localhost:5173/build` by default. A phone cannot open `localhost`, so build
-the real address in: `VITE_BOOTH_URL=http://<laptop-ip>:5173/build npm run dev`.
+**Finale QR code:** the last stage shows a QR code for exactly `https://ieeecspesu.vercel.app` (the club site; fixed in `Act4.tsx`, not configurable).
+The participant form at `/build` still works, it just is not linked from the QR any more: hand out `http://<laptop-ip>:5173/build` yourself if you run the booth form.
 
 ## 6. Tests
 
