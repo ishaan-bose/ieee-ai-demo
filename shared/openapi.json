@@ -113,6 +113,17 @@
             "title": "Active Gpu Seconds",
             "type": "number"
           },
+          "concurrency": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency"
+          },
           "config_summary": {
             "anyOf": [
               {
@@ -224,6 +235,17 @@
               }
             ],
             "title": "Progress"
+          },
+          "samples_per_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Samples Per S"
           },
           "samples_seen": {
             "title": "Samples Seen",
@@ -497,6 +519,14 @@
           "paused": {
             "title": "Paused",
             "type": "boolean"
+          },
+          "running_job_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Running Job Ids",
+            "type": "array"
           }
         },
         "required": [

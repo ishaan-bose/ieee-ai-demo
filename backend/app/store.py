@@ -177,10 +177,20 @@ class Store:
                               "(priority > ? OR (priority = ? AND queue_order < ?))))", (j["priority"], j["priority"], j["queue_order"])).fetchone()[0]
             return int(ahead) + 1
 
-    def recover_after_restart(self) -> dict:
-        """A clean shutdown and a crash are handled the same way (SPEC 6.3): interrupted jobs go back to the front."""
+    def set_job_stats(self, job_id: int, *, concurrency: int | None, samples_per_s: float | None) -> None:
         with self.tx() as c:
-            running = [r["id"] for r in c.execute("SELECT id FROM jobs WHERE status='running' AND kind='competition' ORDER BY id")]
+            c.execute("UPDATE jobs SET concurrency=?, samples_per_s=?, updated_at=? WHERE id=?", (concurrency, samples_per_s, time.time(), job_id))
+
+    def requeue_front_in_order(self, jobs: list[tuple[float, int, bool]]) -> None:
+        """Put several interrupted jobs back at the FRONT, keeping their ORIGINAL order. `jobs`: (queue_order they had, job id, count as preemption).
+        The one that was first in line ends up first again (requeue_front puts each job before everything queued, so the last one goes in first)."""
+        for _order, jid, preempted in sorted(jobs, key=lambda j: (j[0], j[1]), reverse=True):
+            self.requeue_front(jid, count_preemption=preempted)
+
+    def recover_after_restart(self) -> dict:
+        """A clean shutdown and a crash are handled the same way (SPEC 6.3): interrupted jobs go back to the front, in their original order."""
+        with self.tx() as c:
+            running = [r["id"] for r in c.execute("SELECT id FROM jobs WHERE status='running' AND kind='competition' ORDER BY queue_order, id")]
             races = c.execute("SELECT id, race_id FROM jobs WHERE kind='demo_race' AND status IN ('running','queued')").fetchall()
             now = time.time()
             for r in races:

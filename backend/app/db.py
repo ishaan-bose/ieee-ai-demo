@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 TABLES = ("submissions", "jobs", "job_metrics", "checkpoints", "races", "admin_events")
 
@@ -112,6 +112,10 @@ MIGRATIONS = {
     1: [  # v1 -> v2: idempotent submissions (a client retries uploads after the network drops)
         "ALTER TABLE submissions ADD COLUMN client_id TEXT",
         "CREATE UNIQUE INDEX IF NOT EXISTS submissions_client_id ON submissions (client_id) WHERE client_id IS NOT NULL",
+    ],
+    2: [  # v2 -> v3: concurrent jobs: what each finished job ran at (shown in /admin)
+        "ALTER TABLE jobs ADD COLUMN concurrency INTEGER",
+        "ALTER TABLE jobs ADD COLUMN samples_per_s REAL",
     ],
 }
 

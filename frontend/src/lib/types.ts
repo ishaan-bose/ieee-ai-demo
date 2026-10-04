@@ -22,7 +22,7 @@ export interface SubmissionStatus {
 }
 export interface AdminJob {
   id: number; kind: string; status: string; nickname: string | null; model_name: string | null; participant_code: string | null; tier: string | null;
-  param_count: number | null; config_summary: string | null; priority: number; stop_reason: string | null; progress: number | null;
+  param_count: number | null; config_summary: string | null; priority: number; stop_reason: string | null; progress: number | null; concurrency?: number | null; samples_per_s?: number | null;
   samples_seen: number; flops_used: number; active_gpu_seconds: number; preemptions: number; error_message: string | null;
   created_at: number; started_at: number | null; finished_at: number | null;
 }

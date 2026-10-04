@@ -68,6 +68,8 @@ class Settings:
     metrics_seconds: float = 2.0
     val_rows: int = 50_000
     race_max_seconds: float = 120.0  # longest demo race a client may request
+    max_concurrent_jobs: int = 3  # competition jobs trained at the same time, each in its own process (MAX_CONCURRENT_JOBS)
+    max_concurrent_explicit: bool = False  # set in the environment: honoured even on a CPU-only box (otherwise the CPU runs one job at a time)
     host: str = HOST
 
     @property
@@ -125,4 +127,6 @@ def get_settings() -> Settings:
         metrics_seconds=_env_float("METRICS_SECONDS", 2.0),
         val_rows=_env_int("VAL_ROWS", 50_000),
         race_max_seconds=_env_float("RACE_MAX_SECONDS", 120.0),
+        max_concurrent_jobs=_env_int("MAX_CONCURRENT_JOBS", 3),
+        max_concurrent_explicit=bool(os.environ.get("MAX_CONCURRENT_JOBS", "").strip()),
     )

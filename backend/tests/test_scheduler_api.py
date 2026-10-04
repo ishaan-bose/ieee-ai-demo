@@ -43,6 +43,7 @@ def env(monkeypatch, tmp_path, server_data):
     monkeypatch.setenv("CHECKPOINT_SECONDS", "0.3")
     monkeypatch.setenv("METRICS_SECONDS", "0.2")
     monkeypatch.setenv("VAL_ROWS", "200")
+    monkeypatch.setenv("MAX_CONCURRENT_JOBS", "1")  # the tests of the single-job behaviour; tests/test_concurrency.py covers 2 and 3
     return tmp_path / "state"
 
 
@@ -56,6 +57,10 @@ def client(env, request, monkeypatch):
     m = request.node.get_closest_marker("budget")
     if m:
         monkeypatch.setenv("BUDGET_FLOPS", m.args[0])
+    for name, var in (("jobs", "MAX_CONCURRENT_JOBS"), ("timecap", "TIME_CAP_SECONDS")):  # @pytest.mark.jobs(3), @pytest.mark.timecap("0.5")
+        mk = request.node.get_closest_marker(name)
+        if mk:
+            monkeypatch.setenv(var, str(mk.args[0]))
     with TestClient(app) as c:
         yield c
 

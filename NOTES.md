@@ -221,3 +221,26 @@ browsers other than Chromium, projector scaling, Windows laptop commands, the se
   adjudicated, forfeit), WhiteDepth/BlackDepth (full moves; the random mover is 0). No time tags or comments anywhere. After EVERY round the CLI writes `round_NN.pgn`,
   the cumulative `games.pgn` and `results.json` atomically (tmp + rename); old `round_*.pgn` from a previous longer run are removed at the start. The top-8 bracket games are
   in `bracket.json` only (not PGN), as before.
+
+## Faster training at the same FLOPs budget (task 4)
+
+- **Where the GPU time went.** Per step the loop did a host->device copy of the batch indices (and of the colour-flip mask) from ordinary memory: PyTorch makes the
+  CPU wait for the whole CUDA stream on such a copy, so the CPU could never queue step N+1 while the GPU ran step N, and every step paid Python + launch latency in
+  series (about 6.7 TFLOP/s achieved on an L40S). `attack_maps` (an optional input) also did ~150 boolean-mask selections per step, each a device->CPU sync.
+  Fixes (no `torch.compile`, no CUDA graphs): `training/hostio.py HostStager` (pinned ring + non-blocking copy + one event per buffer), valid-index tables computed once,
+  the sync points (clock, loss read-back, NaN check, time cap) adaptive to ~0.25 s of training instead of every 25 steps, `evaluate` accumulating in float64 on the device
+  and reading it back once, and a `micro == 1` fast path with no zeros()/x1.0 scaling. `CompetitionTrainer(optimized=False)` keeps the old loop; a test checks the two
+  produce bit-identical weights, losses and evaluation, and that resume from a checkpoint stays exact. FLOPs = 6 x matmul weights x samples is untouched.
+- **Concurrency.** `Scheduler` is now a dispatcher over child processes (`mp.get_context("spawn")`, one per job, `app/scheduler/job_process.py`); it talks to them through a
+  shared abort flag and a queue, all durable state stays in SQLite. SPEC 6.1's "one worker thread" is replaced by this. The children write terminal outcomes
+  (finished/diverged/time/error) themselves; ABORTS and OOMs are only reported, and the parent decides (requeue in original order, kill, redo). Preempted jobs are
+  re-queued only once every preempted sibling has stopped, so their original order is kept (`Store.requeue_front_in_order`); restart recovery now orders by the queue order
+  they had, not by id. A child whose process dies without a result is retried (3 times, then failed); a child notices when the server died (parent pid changed) and
+  stops without saving. A job that was killed/redone/finished is not treated as "running" just because its process has not been reaped yet.
+- **Calls made:** persistent worker processes were rejected (a fresh process per job gives a clean CUDA context after an OOM; startup is ~2-5 s against minutes of training);
+  the demo race still runs in the dispatcher thread (nothing else is on the GPU while it runs); on a CPU-only box the default is 1 job (processes would fight over the cores;
+  set `MAX_CONCURRENT_JOBS` explicitly to override, and each CPU child takes its share of the torch threads); VRAM admission is strict FCFS (a job that does not fit blocks
+  the ones behind it) and the first job is always admitted; the VRAM estimate is generous (about 2-4.5 GB for typical configs, x1.3 + 0.8 GB per process) and is compared with
+  `torch.cuda.mem_get_info()` and with the estimates of jobs that have just started; `jobs.concurrency` / `jobs.samples_per_s` (DB v3) are written by the parent after it reaps a job.
+- **Test hooks:** `BYOAI_INJECT_OOM=<job ids>` makes those jobs raise one CUDA out-of-memory error at their first start (a marker file in STATE_DIR makes it once); `Scheduler.mem_info`
+  can be replaced to simulate free VRAM.
