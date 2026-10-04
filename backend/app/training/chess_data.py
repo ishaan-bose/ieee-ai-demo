@@ -69,14 +69,15 @@ class ChessData:
             pos = torch.searchsorted(pool.cdf, u).clamp_(max=len(pool) - 1)
         return pool.idx[pos]
 
-    def fetch(self, idx: torch.Tensor) -> dict[str, torch.Tensor]:
-        """Row indices (cpu long) -> dict of tensors on the training device."""
+    def fetch(self, idx: torch.Tensor, stager=None) -> dict[str, torch.Tensor]:
+        """Row indices (cpu long) -> dict of tensors on the training device. `stager` (training.hostio.HostStager) makes the uploads non-blocking."""
+        up = stager.upload if stager is not None else (lambda t: t.to(self.device))
         if self.gpu is not None:
-            i = idx.to(self.device)
+            i = up(idx)
             return {k: self.gpu[k][i] for k in FIELDS}
         order = np.sort(idx.numpy())  # batch order is irrelevant; sorted reads are faster on mmap
-        return {k: torch.from_numpy(np.asarray(self.li[k][order])).to(self.device) for k in FIELDS}
+        return {k: up(torch.from_numpy(np.asarray(self.li[k][order]))) for k in FIELDS}
 
-    def val_batches(self, chunk: int = 8192):
+    def val_batches(self, chunk: int = 8192, stager=None):
         for s in range(0, len(self.val_idx), chunk):
-            yield self.fetch(self.val_idx[s:s + chunk])
+            yield self.fetch(self.val_idx[s:s + chunk], stager)

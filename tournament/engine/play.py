@@ -16,12 +16,35 @@ ADJUDICATE_MATERIAL = 2  # a side that is ahead by at least this many pawns at t
 _VAL = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
 
 
+EVENT = "IEEE CS @ PESU - Build Your Own AI tournament"
+SITE = "IEEE CS @ PESU"
+# PGN Termination vocabulary: internal reason -> tag value. Nothing here (or anywhere in the PGN) records time: the games are deterministic and so is the file.
+TERMINATIONS = {"checkmate": "checkmate", "stalemate": "stalemate", "insufficient material": "insufficient material", "threefold repetition": "repetition",
+                "fifty-move rule": "50-move", "adjudicated by material": "adjudicated"}
+
+
+def termination_tag(reason: str) -> str:
+    return "forfeit" if reason.startswith("forfeit") else TERMINATIONS.get(reason, reason)
+
+
+def full_moves_tag(full_moves: float | None) -> str:
+    """Search depth in FULL moves (2 plies each) as a tag value; a player that does not search (the random mover) is 0."""
+    if not full_moves:
+        return "0"
+    return str(int(full_moves)) if float(full_moves).is_integer() else f"{full_moves:g}"
+
+
 class SearchPlayer:
-    def __init__(self, name: str, searcher: Searcher):
+    def __init__(self, name: str, searcher: Searcher, pgn_name: str | None = None):
         self.name, self.searcher = name, searcher
+        self.pgn_name = pgn_name or name  # "Bot Name (submitter)" in the PGN tags
         self.moves_searched = 0
         self.leaves = 0
         self.seconds = 0.0
+
+    @property
+    def depth_full_moves(self) -> float:
+        return self.searcher.depth / 2
 
     def choose(self, board: chess.Board) -> chess.Move:
         move, _score, st = self.searcher.best_move(board)  # may raise EvalError
@@ -34,8 +57,11 @@ class SearchPlayer:
 class RandomPlayer:
     """The random mover, made deterministic: the move is chosen by a CRC of the position (so repeat runs play identical games)."""
 
-    def __init__(self, name: str = "random"):
+    depth_full_moves = 0
+
+    def __init__(self, name: str = "random", pgn_name: str | None = None):
         self.name = name
+        self.pgn_name = pgn_name or "Random Bot (reference)"
 
     def choose(self, board: chess.Board) -> chess.Move:
         moves = sorted(board.legal_moves, key=lambda m: m.uci())
@@ -49,6 +75,8 @@ class StockfishPlayer:
         import chess.engine
 
         self.name = name or f"stockfish-d{depth}"
+        self.pgn_name = f"Stockfish depth {depth} (reference)"
+        self.depth_full_moves = depth / 2
         self.depth = depth
         self.engine = chess.engine.SimpleEngine.popen_uci(path)
         self.engine.configure({"Threads": 1, "Hash": 16})
@@ -72,6 +100,11 @@ class GameResult:
     opening: str = ""
     opening_plies: int = 0
     forfeit: str | None = None  # name of the side that forfeited
+    start_fen: str = chess.STARTING_FEN  # the position after the opening moves: the PGN starts here (SetUp/FEN tags)
+    white_pgn: str = ""  # "Bot Name (submitter)" for the PGN tags (falls back to the internal name)
+    black_pgn: str = ""
+    white_depth: float | None = None  # search depth in full moves
+    black_depth: float | None = None
     extra: dict = field(default_factory=dict)
 
     def score_for(self, name: str) -> float:
@@ -89,12 +122,20 @@ class GameResult:
             b.push(m)
         return out
 
-    def pgn(self, event: str = "AI tournament", round_: str = "?") -> str:
+    def pgn(self, event: str = EVENT, round_: str = "?") -> str:
+        """One game as PGN. Tags: Event, Site, Date (unknown: games carry no time), Round, White, Black, Result, SetUp + FEN (the opening position),
+        Opening, Termination and the search depth of each side in full moves. No time tags, no clocks, no comments: repeat runs are byte-identical."""
         g = chess.pgn.Game()
-        g.headers.update({"Event": event, "Site": "?", "Date": "????.??.??", "Round": round_, "White": self.white, "Black": self.black,
-                          "Result": self.result, "Termination": self.reason, "Opening": self.opening})
+        h = g.headers
+        h["Event"], h["Site"], h["Date"], h["Round"] = event, SITE, "????.??.??", round_
+        h["White"], h["Black"], h["Result"] = self.white_pgn or self.white, self.black_pgn or self.black, self.result
+        h["SetUp"], h["FEN"] = "1", self.start_fen
+        if self.opening:
+            h["Opening"] = self.opening
+        h["Termination"] = termination_tag(self.reason)
+        h["WhiteDepth"], h["BlackDepth"] = full_moves_tag(self.white_depth), full_moves_tag(self.black_depth)
         node = g
-        for u in self.moves:
+        for u in self.moves[self.opening_plies:]:
             node = node.add_variation(chess.Move.from_uci(u))
         return str(g) + "\n\n"
 
@@ -117,8 +158,12 @@ def play_game(white, black, opening: tuple[str, list[str]] | None = None, max_pl
                 raise ValueError(f"illegal opening move {u} in {name}")
             board.push(m); uci.append(u)
 
+    start_fen = board.fen()
+
     def done(result: str, reason: str, forfeit: str | None = None) -> GameResult:
-        return GameResult(white.name, black.name, result, reason, uci, name, len(plies), forfeit)
+        return GameResult(white.name, black.name, result, reason, uci, name, len(plies), forfeit, start_fen,
+                          getattr(white, "pgn_name", white.name), getattr(black, "pgn_name", black.name),
+                          getattr(white, "depth_full_moves", None), getattr(black, "depth_full_moves", None))
 
     while True:
         if board.is_checkmate():

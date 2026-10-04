@@ -87,11 +87,21 @@ _DIAG = (4, 5, 6, 7)
 _tables_cache: dict[str, tuple] = {}
 
 
+def _valid_idx(table: torch.Tensor, device) -> torch.Tensor:
+    """Indices of the valid (>= 0) entries of a target table along its last axis, computed ONCE on the CPU. Selecting with a boolean mask on the
+    GPU (`t[t >= 0]`) is a device->CPU sync; attack_maps used to do that ~150 times per training step."""
+    return torch.nonzero(table >= 0).squeeze(-1).to(device) if table.dim() == 1 else None
+
+
 def _tables(device):
     key = str(device)
     if key not in _tables_cache:
-        _tables_cache[key] = (_RAYS.to(device), _KNIGHT.to(device), _KING.to(device),
-                              {k: v.to(device) for k, v in _PAWN.items()})
+        rays = [[_valid_idx(_RAYS[d, k], device) for k in range(7)] for d in range(8)]
+        knight = [_valid_idx(_KNIGHT[i], device) for i in range(8)]
+        king = [_valid_idx(_KING[i], device) for i in range(8)]
+        pawn = {c: [_valid_idx(_PAWN[c][i], device) for i in range(2)] for c in (0, 1)}
+        _tables_cache[key] = (_RAYS.to(device), _KNIGHT.to(device), _KING.to(device), {k: v.to(device) for k, v in _PAWN.items()},
+                              rays, knight, king, pawn)
     return _tables_cache[key]
 
 
@@ -102,7 +112,7 @@ def attack_maps(boards: torch.Tensor) -> torch.Tensor:
     """
     b = boards.long()
     dev = b.device
-    rays, knight, king, pawn = _tables(dev)
+    rays, knight, king, pawn, v_rays, v_knight, v_king, v_pawn = _tables(dev)
     occupied = b > 0
     out = torch.zeros(b.shape[0], 2, 64, dtype=torch.bool, device=dev)
     for color in (0, 1):  # 0 = white pieces (codes 1-6), 1 = black (7-12)
@@ -110,21 +120,20 @@ def attack_maps(boards: torch.Tensor) -> torch.Tensor:
         is_p, is_n, is_b, is_r, is_q, is_k = (b == base + i for i in range(6))
         att = out[:, color]
 
-        def add(src_mask, targets):  # targets: (64,) square index of target for each source square, -1 = none
-            valid = targets >= 0
+        def add(src_mask, targets, valid):  # targets: (64,) square index of target for each source square, -1 = none; valid: its valid indices
             att[:, targets[valid]] |= src_mask[:, valid]
 
         for i in range(2):
-            add(is_p, pawn[1 if color == 0 else 0][i])
+            add(is_p, pawn[1 if color == 0 else 0][i], v_pawn[1 if color == 0 else 0][i])
         for i in range(8):
-            add(is_n, knight[i])
-            add(is_k, king[i])
+            add(is_n, knight[i], v_knight[i])
+            add(is_k, king[i], v_king[i])
         for di in range(8):
             slider = (is_r | is_q) if di in _ORTHO else (is_b | is_q)
             alive = slider.clone()
             for k in range(7):
                 tgt = rays[di, k]
-                valid = tgt >= 0
+                valid = v_rays[di][k]
                 att[:, tgt[valid]] |= alive[:, valid]
                 # a ray stops AFTER the first occupied square it reaches; `alive` is indexed by ORIGIN square
                 alive = alive & _ray_shift_free(occupied, tgt, valid)
@@ -134,7 +143,7 @@ def attack_maps(boards: torch.Tensor) -> torch.Tensor:
 def _ray_shift_free(occupied: torch.Tensor, tgt: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
     """For each origin square s: is the square it just attacked (tgt[s]) empty? (False when off-board.)"""
     free = torch.zeros_like(occupied)
-    free[:, valid] = ~occupied[:, tgt[valid]]
+    free[:, valid] = ~occupied[:, tgt[valid]]  # (`valid` is an index tensor here)
     return free
 
 

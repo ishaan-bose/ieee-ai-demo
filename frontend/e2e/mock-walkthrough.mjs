@@ -142,7 +142,7 @@ await check("Act 3 trap reveals confusion matrix, recall and the fix; overfittin
 await check("Act 4: tech tree, rematch, close with stats and QR", async () => {
   await goto("a4-tech"); await page.getByTestId("node-ema").waitFor(); await page.waitForTimeout(6000);
   await goto("a4-rematch"); await space(); await page.getByTestId("options").locator("button").first().waitFor({ timeout: 9000 });
-  await goto("a4-close"); await page.getByTestId("stats").waitFor(); await page.getByTestId("booth-url").waitFor();
+  await goto("a4-close"); await page.getByTestId("stats").waitFor(); await page.getByTestId("club-url").waitFor();
 });
 
 await check("Shift+D toggles the performance overlay (off by default)", async () => {

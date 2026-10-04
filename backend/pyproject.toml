@@ -4,5 +4,7 @@ pythonpath = ["."]
 addopts = "-q"
 markers = [
     "budget(value): FLOPs budget for scheduler/API tests that need a long-running job",
+    "jobs(n): MAX_CONCURRENT_JOBS for scheduler/API tests (default 1 in those tests)",
+    "timecap(seconds): TIME_CAP_SECONDS for a scheduler/API test",
     "real_data: checks the real files under DATA_DIR (opt in with REAL_DATA=1; run on the server)",
 ]

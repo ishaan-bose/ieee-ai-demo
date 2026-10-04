@@ -122,10 +122,30 @@ themselves and resume from their last checkpoint (see NOTES.md about starting it
 | `NUM_WORKERS` | `4` | worker count. Never taken from `nproc`, which lies on this box |
 | `ADMIN_TOKEN` | none | needed for `/admin` (admin is disabled without it) |
 | `BUDGET_FLOPS`, `TIME_CAP_SECONDS` | calibration file, else `1e16`, `1620` | training budget per competition model |
+| `MAX_CONCURRENT_JOBS` | `3` (`1` on a CPU-only box unless set) | competition jobs trained at the same time, each in its own process; see "Concurrent training" below |
 | `CHECKPOINT_SECONDS`, `METRICS_SECONDS`, `VAL_ROWS`, `RACE_MAX_SECONDS` | `10`, `2`, `50000`, `120` | see `backend/.env.example` |
 | `SELF_CHECK` | `1` | `0` skips the startup self-check |
 
 The backend always binds `127.0.0.1:8000`: not reachable from the internet, only through the SSH tunnel.
+
+### Concurrent training (`MAX_CONCURRENT_JOBS`)
+
+A single training job cannot keep an L40S busy: each step is a few small kernels, so the time goes into Python and kernel launches and the GPU idles
+(about 6.7 TFLOP/s achieved, about 3 GB of VRAM used). So the scheduler trains up to **3 jobs at once, each in its own process** (one CUDA context each).
+Nothing about a job changes: same FLOPs budget, same seed, the participant's batch size and every other knob untouched (a test checks the fast loop is
+bit-identical to the old one); a finished job is exactly as good, it just did not wait for the GPU to be free.
+
+- **Change it:** edit `backend/.env`, set `MAX_CONCURRENT_JOBS=2` (or `1` for the old one-at-a-time behaviour), then restart the backend
+  (`tmux attach -t backend`, Ctrl+C, run it again). Jobs interrupted by the restart resume from their checkpoints.
+- **Order stays first-come-first-served:** jobs START in submission order. Before a job starts, its VRAM need is estimated and compared with
+  `torch.cuda.mem_get_info()` plus what the running jobs have not allocated yet; if it does not fit, fewer jobs run and the queue waits (nobody overtakes).
+- **A demo race (or Demo Mode / Pause) takes the whole GPU:** every running competition job stops without saving, the race runs, and the jobs go back
+  to the front of the queue in their original order and resume from their last checkpoints. Admin kill / redo / remove / pause / reset work per job or on all.
+- **Out of memory:** the job goes back to the FRONT of the queue (nothing is lost), the live concurrency drops by one for 2 minutes, then climbs back.
+- **How to tell it is set too high:** `/admin` shows each finished job's stop reason, samples/s and the concurrency it ran under, and the log prints
+  `job N finished: stop reason ..., X samples/s, Y active GPU s, ran with up to C job(s) at once`. A job that ends with stop reason **time** (it hit
+  the active-GPU-time cap before its FLOPs budget) logs a WARNING saying the concurrency may be too high: lower `MAX_CONCURRENT_JOBS`. Watch `nvidia-smi`:
+  if utilisation is still low with 3 jobs, raise it; if jobs end with `time`, lower it. (Not measurable without the GPU: see FINAL_REPORT.)
 
 ## 4. The SSH tunnel (laptop)
 
@@ -184,8 +204,8 @@ which is the tunnel. (`/admin` itself, opened in the browser, is the admin *page
 phone (same Wi-Fi). The phone follows whichever stage the laptop is on. This exposes the dev server on your Wi-Fi: use it on a
 trusted network and switch it back to plain `npm run dev` afterwards. In the same browser, a second tab on `/presenter` works too.
 
-**Booth QR code:** the finale shows a QR code for `http://localhost:5173/build` by default. A phone cannot open `localhost`, so build
-the real address in: `VITE_BOOTH_URL=http://<laptop-ip>:5173/build npm run dev`.
+**Finale QR code:** the last stage shows a QR code for exactly `https://ieeecspesu.vercel.app` (the club site; fixed in `Act4.tsx`, not configurable).
+The participant form at `/build` still works, it just is not linked from the QR any more: hand out `http://<laptop-ip>:5173/build` yourself if you run the booth form.
 
 ## 6. Tests
 
@@ -250,7 +270,7 @@ shared/          RASTERIZER.md, AUDIO_FEATURES.md, MODEL_FORMAT.md, tiers.json, 
 backend/
   app/           main.py, config.py, db.py, store.py, schemas.py, device.py, selfcheck.py
     api/         health, dev, demo (races), submissions, admin, presenter
-    scheduler/   worker.py: one worker, FCFS, demo races preempt competition jobs
+    scheduler/   worker.py: dispatcher, FCFS, up to MAX_CONCURRENT_JOBS jobs at once (job_process.py: one process each, vram.py: admission), demo races preempt ALL of them
     training/    trainer.py, race.py, chess_data.py, losses.py, optim.py, classifier.py, audio_models.py, race_grid.py
     chess_net/   encoder.py (THE shared position encoder), model.py, config.py, model_io.py (THE shared loader)
     data/        contract.py (SPEC 4 as code), loaders.py, rasterizer.py, audio_features.py

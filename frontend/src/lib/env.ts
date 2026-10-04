@@ -20,5 +20,3 @@ const listeners = new Set<() => void>();
 export const isMockOffline = () => mockOffline;
 export function setMockOffline(v: boolean) { mockOffline = v; listeners.forEach((l) => l()); }
 export const onMockOfflineChange = (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn); };
-
-export const BOOTH_URL: string = (import.meta.env.VITE_BOOTH_URL as string | undefined) ?? (typeof location !== "undefined" ? `${location.origin}/build` : "/build");

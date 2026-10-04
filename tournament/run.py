@@ -6,7 +6,7 @@
 
 Safety: refuses to run while the training queue is non-empty (jobs queued or running) unless --force.
 Deterministic: repeat runs on the same models and settings play identical games (no randomness anywhere).
-Outputs in --out: ratings.json, standings.csv, games.pgn, results.json, sanity.json, bracket.json (top-8 playoff, precomputed so playback never waits), run_config.json.
+Outputs in --out: round_NN.pgn (written after EVERY round, with the cumulative games.pgn and results.json), ratings.json, standings.csv, sanity.json, bracket.json (top-8 playoff, precomputed so playback never waits), run_config.json.
 """
 
 from __future__ import annotations
@@ -54,10 +54,29 @@ def _clean(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in s).strip("_") or "model"
 
 
+def _tag(s: str, limit: int = 40) -> str:
+    """Make a free-text name safe inside a PGN tag: no control characters, quotes or backslashes, single spaces."""
+    s = "".join(" " if c.isspace() else c for c in str(s))
+    s = "".join(c for c in s if c.isprintable() and c not in '"\\')
+    return " ".join(s.split())[:limit]
+
+
+def pgn_player_name(dir_name: str, doc: dict) -> str:
+    """'Bot Name (submitter)' from the saved model's config.json (model_name, nickname). The House Net and the baseline config get fixed names.
+    Only public fields are read: a model folder never contains contact details."""
+    code = str(doc.get("participant_code", ""))
+    if dir_name == "house-net" or code == "HOUSE":
+        return "House Net (IEEE CS)"
+    if dir_name == "default-config" or code == "DEFAULT":
+        return "Default Config (reference)"
+    model = _tag(doc.get("model_name") or dir_name) or "Model"
+    return f"{model} ({_tag(doc.get('nickname') or '', 24) or 'anonymous'})"
+
+
 def load_entrants(model_dirs: list[Path], device: str, depth_cap_plies: int | None, depth_override: int | None, node_cap: int | None, chunk: int) -> list[Entrant]:
     from app.chess_net.model_io import load_model
 
-    out, used = [], set()
+    out, used, used_pgn = [], set(), set()
     for d in model_dirs:
         lm = load_model(d, device)
         doc = lm.doc
@@ -70,15 +89,21 @@ def load_entrants(model_dirs: list[Path], device: str, depth_cap_plies: int | No
             depth = min(depth, depth_cap_plies)
         nick, mname = doc.get("nickname", ""), doc.get("model_name", d.name)
         display = _clean(f"{mname}" + (f"_by_{nick}" if nick and nick != mname else ""))
-        player = SearchPlayer(display, Searcher(NetEvaluator(lm, chunk), depth_plies=depth, node_cap=node_cap))
+        pgn_name = pgn_player_name(d.name, doc)
+        n = 1
+        while pgn_name in used_pgn:  # two entries with the same bot name and submitter stay distinguishable
+            n += 1
+            pgn_name = f"{pgn_player_name(d.name, doc)} #{n}"
+        used_pgn.add(pgn_name)
+        player = SearchPlayer(display, Searcher(NetEvaluator(lm, chunk), depth_plies=depth, node_cap=node_cap), pgn_name)
         out.append(Entrant(pid, display, player, {"id": pid, "name": display, "nickname": nick, "model_name": mname, "tier": doc.get("tier"),
-                                                   "params": doc.get("param_count"), "depth_plies": depth, "dir": str(d)}))
+                                                   "params": doc.get("param_count"), "depth_plies": depth, "pgn_name": pgn_name, "dir": str(d)}))
     return out
 
 
 def reference_bots(node_cap: int | None, stockfish: str | None, sf_depth: int) -> dict[str, object]:
-    bots: dict[str, object] = {"bot_random": RandomPlayer("bot_random"),
-                               "bot_material": SearchPlayer("bot_material", Searcher(MaterialEvaluator(), depth_plies=2, node_cap=node_cap))}
+    bots: dict[str, object] = {"bot_random": RandomPlayer("bot_random", "Random Bot (reference)"),
+                               "bot_material": SearchPlayer("bot_material", Searcher(MaterialEvaluator(), depth_plies=2, node_cap=node_cap), "Material Bot (reference)")}
     if stockfish:
         bots[f"bot_stockfish_d{sf_depth}"] = StockfishPlayer(stockfish, sf_depth, f"bot_stockfish_d{sf_depth}")
     return bots
@@ -103,7 +128,8 @@ def sanity_gate(entrants: list[Entrant], max_plies: int = 80) -> dict[str, dict]
 
 
 # ------------------------------------------------------------------ tournament
-def run_swiss(entrants: list[Entrant], bots: dict[str, object], rounds: int, max_plies: int, seed: int, log=print):
+def run_swiss(entrants: list[Entrant], bots: dict[str, object], rounds: int, max_plies: int, seed: int, log=print, on_round=None):
+    """on_round(round_number, that_round's_games, all_games_so_far) is called after EVERY round (the CLI writes the PGN files there)."""
     players = [e.id for e in entrants]
     by_id = {e.id: e.player for e in entrants}
     by_id.update(bots)
@@ -121,8 +147,9 @@ def run_swiss(entrants: list[Entrant], bots: dict[str, object], rounds: int, max
         for white, black in ((a, b), (b, a)):
             g = play_game(by_id[white], by_id[black], op, max_plies=max_plies)
             n_open += 1
+            nth = sum(1 for x in games if x["round"] == rnd) + 1
             games.append({"round": rnd, "white": white, "black": black, "result": g.result, "reason": g.reason, "opening": op[0], "plies": len(g.moves),
-                          "forfeit": g.forfeit, "pgn": g.pgn(round_=str(rnd)), "moves": g.moves})
+                          "forfeit": g.forfeit, "pgn": g.pgn(round_=f"{rnd}.{nth}"), "moves": g.moves})
             sa = g.score_for(by_id[a].name)
             results.append((a, b, sa))
             if a in scores: scores[a] += sa
@@ -148,6 +175,8 @@ def run_swiss(entrants: list[Entrant], bots: dict[str, object], rounds: int, max
             bot = bot_cycle[(r - 1) % len(bot_cycle)]
             play_pair(bye, bot, r, (r - 1) * 5 + len(pairs))
         log(f"   {len(games)} games so far")
+        if on_round:
+            on_round(r, [g for g in games if g["round"] == r], games)
     return games, results, scores, rounds_played
 
 
@@ -194,6 +223,12 @@ def run_bracket(entrants: list[Entrant], elo: dict[str, float], max_plies: int, 
         rounds.append({"name": names.get(len(current), f"round {rnd}"), "matches": matches})
         current, rnd = nxt, rnd + 1
     return {"rounds": rounds, "champion": current[0].id, "seeds": {e.id: i + 1 for i, e in enumerate(seeds)}}
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
 
 
 # ------------------------------------------------------------------ main
@@ -256,9 +291,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     a.out.mkdir(parents=True, exist_ok=True)
+    for old in a.out.glob("round_*.pgn"):  # leftovers of an earlier run with more rounds would be mistaken for this run's rounds
+        old.unlink()
     bots = reference_bots(a.node_cap, a.stockfish, a.stockfish_depth)
     t0 = time.time()
-    games, results, scores, rounds_played = run_swiss(entrants, bots, a.rounds, a.max_plies, a.seed)
+
+    def write_progress(rnd: int, round_games: list[dict], all_games: list[dict]) -> None:
+        """After every round: that round's games in round_NN.pgn, the cumulative games.pgn and results.json, each written atomically, so a crash loses nothing."""
+        _write_atomic(a.out / f"round_{rnd:02d}.pgn", "".join(g["pgn"] for g in round_games))
+        _write_atomic(a.out / "games.pgn", "".join(g["pgn"] for g in all_games))
+        _write_atomic(a.out / "results.json", json.dumps([{k: v for k, v in g.items() if k != "pgn"} for g in all_games]))
+
+    games, results, scores, rounds_played = run_swiss(entrants, bots, a.rounds, a.max_plies, a.seed, on_round=write_progress)
     ids = [e.id for e in entrants] + sorted(bots)
     elo = bradley_terry(results, ids)
     elo = anchor_to(elo, "bot_random", 0.0)

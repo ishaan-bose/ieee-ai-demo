@@ -143,6 +143,8 @@ class JobOut(BaseModel):
     active_gpu_seconds: float
     preemptions: int
     error_message: str | None = None
+    concurrency: int | None = None  # most competition jobs that were training at the same time while this one ran
+    samples_per_s: float | None = None
     created_at: float
     started_at: float | None = None
     finished_at: float | None = None
@@ -152,6 +154,7 @@ class QueueOut(BaseModel):
     paused: bool
     demo_mode: bool
     current_job_id: int | None
+    running_job_ids: list[int] = []  # every competition job training right now (up to MAX_CONCURRENT_JOBS)
     budget_flops: float
     jobs: list[JobOut]
 

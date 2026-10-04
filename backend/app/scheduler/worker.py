@@ -1,16 +1,23 @@
-"""The scheduler (SPEC 6.1): ONE worker thread, FCFS queue, demo races preempt competition training by killing it.
+"""The scheduler (SPEC 6.1): a dispatcher thread, a FCFS queue, up to MAX_CONCURRENT_JOBS competition jobs at once, each in its OWN process.
 
-- A demo race sets the abort flag of a running competition job. The trainer stops within a step or two WITHOUT saving; the job
-  returns to the FRONT of the queue and later resumes from its last periodic checkpoint (no samples are double counted).
-- Demo Mode (and pause) keep competition jobs off the GPU entirely.
+- FCFS: jobs START in queue order (priority, then queue_order). A job whose estimated VRAM does not fit the GPU right now makes the ones behind it wait
+  (nothing overtakes it); fewer jobs run until memory frees up. After a CUDA out-of-memory error the job goes back to the FRONT of the queue and the live
+  concurrency drops by one for a while (it climbs back one step per cool-down).
+- A demo race (priority 100) takes the whole GPU: ALL running competition jobs are aborted (they stop within a step or two WITHOUT saving), the race runs,
+  and the interrupted jobs return to the FRONT of the queue in their ORIGINAL order, each resuming from its last periodic checkpoint (no samples are
+  double counted). The race itself runs in the dispatcher thread (it needs no process of its own: nothing else is on the GPU).
+- Demo Mode and pause keep competition jobs off the GPU entirely; admin kill / redo / remove act on one job, reset on all.
 - Everything durable is in SQLite; on start, interrupted jobs are re-queued (a crash and a clean shutdown are treated the same).
-- When the queue is empty the worker idles and does nothing.
+- When the queue is empty the dispatcher idles and does nothing.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import multiprocessing as mp
+import os
+import queue as queue_mod
 import shutil
 import threading
 import time
@@ -23,12 +30,15 @@ from app.chess_net.config import resolve_config
 from app.config import Settings
 from app.data.loaders import LichessData, QuickDrawData
 from app.device import DeviceInfo
+from app.scheduler import vram
+from app.scheduler.job_process import ABORT_CODES, worker_main
 from app.store import Store
-from app.training.chess_data import ChessData
 from app.training.race import DoodleData, Lane, resolve_lanes, run_race
-from app.training.trainer import CompetitionTrainer
 
 log = logging.getLogger("scheduler")
+
+OOM_COOLDOWN_S = 120.0  # after an out-of-memory error: run one job fewer for this long, then climb back one step at a time
+MAX_CRASHES = 3  # a job whose process dies without a result this many times is failed instead of retried forever
 
 
 class RaceState:
@@ -56,13 +66,20 @@ ABORT_PRIORITY = {"shutdown": 0, "preempt": 1, "redo": 2, "kill": 3}  # an admin
 
 
 class Running:
-    def __init__(self, job: dict):
+    """A job that is on the GPU: a competition job in a child process (`proc`), or the demo race in the dispatcher thread."""
+
+    def __init__(self, job: dict, proc=None, flag=None, out_q=None, est_vram: int = 0):
         self.job, self.job_id, self.kind = job, job["id"], job["kind"]
         self.reason: str | None = None  # abort reason: preempt | kill | redo | shutdown
+        self.proc, self.flag, self.out_q, self.est_vram = proc, flag, out_q, est_vram
+        self.result: dict | None = None
+        self.peak = 1  # most competition jobs that were running together while this one ran
 
     def abort(self, reason: str) -> None:
         if self.reason is None or ABORT_PRIORITY[reason] > ABORT_PRIORITY[self.reason]:
             self.reason = reason
+            if self.flag is not None:
+                self.flag.value = ABORT_CODES[reason]
 
     def should_abort(self) -> bool:
         return self.reason is not None
@@ -71,14 +88,52 @@ class Running:
 class Scheduler:
     def __init__(self, settings: Settings, device: DeviceInfo, store: Store):
         self.s, self.store, self.device = settings, store, torch.device(device.device)
-        self.current: Running | None = None
+        self.running: dict[int, Running] = {}  # competition jobs, one child process each
+        self.race_run: Running | None = None  # the demo race currently on the GPU
         self.races: dict[str, RaceState] = {}
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._chess: ChessData | None = None
         self._doodles: DoodleData | None = None
         self._guard = threading.Lock()
+        self._ctx = mp.get_context("spawn")
+        self._pending_requeue: list[tuple[float, int, bool]] = []  # preempted jobs waiting for their siblings to stop, so they go back in order
+        self._crashes: dict[int, int] = {}
+        self._oom_penalty = 0  # how many slots are withheld after out-of-memory errors
+        self._penalty_until = 0.0
+        self.oom_cooldown_s = OOM_COOLDOWN_S
+        self._data_bytes: int | None = None
+        self._wait_logged: int | None = None
+        self.mem_info = self._cuda_mem_info if self.device.type == "cuda" else None  # () -> (free, total) bytes; tests replace it
+
+    # ------------------------------------------------------------ properties used by the API
+    @property
+    def current(self) -> Running | None:
+        """One running job (the first competition job, else the race): what /admin shows as 'the' current job."""
+        with self._guard:
+            return next(iter(self.running.values()), None) or self.race_run
+
+    def running_jobs(self) -> list[Running]:
+        with self._guard:
+            return list(self.running.values())
+
+    @property
+    def max_jobs(self) -> int:
+        if self.device.type == "cuda" or self.s.max_concurrent_explicit:
+            return max(1, self.s.max_concurrent_jobs)
+        return 1  # a CPU-only box: processes would only fight over the same cores
+
+    def effective_limit(self) -> int:
+        """MAX_CONCURRENT_JOBS minus the slots withheld after out-of-memory errors (restored one per cool-down)."""
+        now = time.time()
+        while self._oom_penalty > 0 and now >= self._penalty_until:
+            self._oom_penalty -= 1
+            self._penalty_until = now + self.oom_cooldown_s
+            log.info("concurrency raised to %d after the out-of-memory cool-down", max(1, self.max_jobs - self._oom_penalty))
+        return max(1, self.max_jobs - self._oom_penalty)
+
+    def _cuda_mem_info(self) -> tuple[int, int]:
+        return torch.cuda.mem_get_info(self.device)
 
     # ------------------------------------------------------------ lifecycle
     def start(self) -> dict:
@@ -90,11 +145,12 @@ class Scheduler:
         self._thread.start()
         return rec
 
-    def stop(self, timeout: float = 20.0) -> None:
+    def stop(self, timeout: float = 25.0) -> None:
         self._stop.set()
-        cur = self.current
-        if cur:
-            cur.abort("shutdown")
+        for r in self.running_jobs():
+            r.abort("shutdown")
+        if self.race_run:
+            self.race_run.abort("shutdown")
         self._wake.set()
         if self._thread:
             self._thread.join(timeout)
@@ -103,11 +159,6 @@ class Scheduler:
         self._wake.set()
 
     # ------------------------------------------------------------ data (loaded lazily, once)
-    def chess_data(self) -> ChessData:
-        if self._chess is None:
-            self._chess = ChessData(LichessData(self.s.data_dir / "lichess"), self.device, val_rows=self.s.val_rows)
-        return self._chess
-
     def doodle_data(self) -> DoodleData:
         if self._doodles is None:
             self._doodles = DoodleData.from_dir(QuickDrawData(self.s.data_dir / "quickdraw"), self.device)
@@ -127,12 +178,19 @@ class Scheduler:
         self.wake()
 
     def preempt_competition(self) -> bool:
-        cur = self.current
-        if cur and cur.kind == "competition":
-            log.info("preempting competition job %s", cur.job_id)
-            cur.abort("preempt")
-            return True
-        return False
+        """The GPU is needed for something else: every running competition job leaves it (and comes back later, in order)."""
+        runs = self.running_jobs()
+        for r in runs:
+            if r.reason is None:  # (the dispatcher repeats this every tick until the children have stopped: log once)
+                log.info("preempting competition job %s", r.job_id)
+            r.abort("preempt")
+        return bool(runs)
+
+    def kill_all(self) -> None:
+        for r in self.running_jobs():
+            r.abort("kill")
+        if self.race_run:
+            self.race_run.abort("kill")
 
     def abort_race(self, race_id: str) -> bool:
         st = self.races.get(race_id)
@@ -152,10 +210,21 @@ class Scheduler:
             self.preempt_competition()
         self.wake()
 
+    def _running(self, job_id: int) -> Running | None:
+        """The live Running of a job that is training right now. A child writes 'done' a moment BEFORE the parent notices its process exited: such a job
+        is finished, not running."""
+        with self._guard:
+            run = self.running.get(job_id)
+        if run is not None:
+            job = self.store.get_job(job_id)
+            if job is None or job["status"] != "running":
+                return None
+        return run
+
     def kill_job(self, job_id: int) -> str:
-        cur = self.current
-        if cur and cur.job_id == job_id:
-            cur.abort("kill")
+        run = self._running(job_id)
+        if run:
+            run.abort("kill")
             return "killing"
         job = self.store.get_job(job_id)
         if job and job["status"] == "queued":
@@ -165,9 +234,9 @@ class Scheduler:
         return "not_running"
 
     def redo_job(self, job_id: int) -> str:
-        cur = self.current
-        if cur and cur.job_id == job_id:
-            cur.abort("redo")
+        run = self._running(job_id)
+        if run:
+            run.abort("redo")
             return "redoing"
         job = self.store.get_job(job_id)
         paths = self.store.reset_job_from_scratch(job_id)
@@ -183,9 +252,9 @@ class Scheduler:
 
     def wait_idle(self, timeout: float = 15.0) -> bool:
         t0 = time.time()
-        while self.current is not None and time.time() - t0 < timeout:
+        while (self.running or self.race_run is not None) and time.time() - t0 < timeout:
             time.sleep(0.05)
-        return self.current is None
+        return not self.running and self.race_run is None
 
     # ------------------------------------------------------------ files
     @staticmethod
@@ -205,36 +274,193 @@ class Scheduler:
         if job.get("submission_id"):
             shutil.rmtree(self.s.models_dir / job["submission_id"], ignore_errors=True)
 
-    # ------------------------------------------------------------ the worker
+    # ------------------------------------------------------------ the dispatcher
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                allow = not (self.store.is_paused() or self.store.is_demo_mode())
-                job = self.store.next_job(allow)
-            except Exception:  # noqa: BLE001  the worker must never die
-                log.error("scheduler DB error: %s", traceback.format_exc())
+                self._poll_children()
+                paused = self.store.is_paused() or self.store.is_demo_mode()
+                if paused and self.running:
+                    self.preempt_competition()
+                if self.store.has_queued("demo_race"):
+                    if self.running or self._pending_requeue:
+                        self.preempt_competition()  # make room: the race gets the whole GPU
+                    else:
+                        job = self.store.next_job(False)
+                        if job is not None:
+                            self._run_race_job(job)
+                            continue
+                elif not paused and not self._pending_requeue:
+                    self._fill_slots()
+            except Exception:  # noqa: BLE001  the dispatcher must never die
+                log.error("scheduler error: %s", traceback.format_exc())
                 time.sleep(1.0)
                 continue
-            if job is None:
-                self._wake.wait(0.5)
-                self._wake.clear()
-                continue
-            run = Running(job)
-            with self._guard:
-                self.current = run
+            self._wake.wait(0.1 if (self.running or self._pending_requeue) else 0.5)
+            self._wake.clear()
+        self._shutdown_children()
+
+    # ------------------------------------------------------------ starting competition jobs
+    def _data_resident_bytes(self) -> int:
+        if self._data_bytes is None:
             try:
-                if job["kind"] == "demo_race":
-                    self._run_race(run)
+                from app.training.chess_data import FIELDS
+
+                self._data_bytes = int(LichessData(self.s.data_dir / "lichess").nbytes(FIELDS)) if self.device.type == "cuda" else 0
+            except Exception:  # noqa: BLE001
+                self._data_bytes = 0
+        return self._data_bytes
+
+    def _estimate(self, job: dict) -> int:
+        sub = self.store.get_submission(job["submission_id"])
+        cfg, errors = resolve_config(json.loads(sub["config_json"]))
+        if errors:
+            return 0  # the child will fail the job with the validation message
+        return vram.estimate_job_vram(cfg, self._data_resident_bytes())
+
+    def _fits(self, job: dict, est: int) -> bool:
+        if self.mem_info is None or not self.running:
+            return True  # CPU box, or nothing else is running: the job gets the GPU (a job that cannot fit even alone shrinks its micro-batches)
+        free, total = self.mem_info()
+        committed = sum(r.est_vram for r in self.running_jobs())
+        return vram.admit(est, free, total, committed)
+
+    def _fill_slots(self) -> None:
+        limit = self.effective_limit()
+        while len(self.running) < limit and not self._stop.is_set():
+            job = self.store.next_job(True)
+            if job is None:
+                self._wait_logged = None
+                return
+            if job["id"] in self.running:  # re-queued (redo) while its old process is still being reaped: start it once that is done
+                return
+            est = self._estimate(job)
+            if not self._fits(job, est):
+                if self._wait_logged != job["id"]:  # once per job, not once per poll
+                    self._wait_logged = job["id"]
+                    log.info("job %s waits: its estimated %.1f GB do not fit next to the %d running job(s) (strict FCFS: nothing overtakes it)",
+                             job["id"], est / 2**30, len(self.running))
+                return
+            self._start_child(job, est)
+
+    def _start_child(self, job: dict, est: int) -> None:
+        flag = self._ctx.Value("i", 0)
+        out_q = self._ctx.Queue()
+        self.store.mark_running(job["id"])
+        proc = self._ctx.Process(target=worker_main, args=(self.s, str(self.device), job["id"], flag, out_q, os.getpid()), daemon=True,
+                                 name=f"job-{job['id']}")
+        run = Running(job, proc, flag, out_q, est)
+        with self._guard:
+            self.running[job["id"]] = run
+        proc.start()
+        n = len(self.running)
+        for r in self.running_jobs():
+            r.peak = max(r.peak, n)
+        log.info("job %s started in process %s (%d running, limit %d)", job["id"], proc.pid, n, self.effective_limit())
+
+    # ------------------------------------------------------------ watching them
+    def _drain(self, run: Running) -> None:
+        while True:
+            try:
+                msg = run.out_q.get_nowait()
+            except queue_mod.Empty:
+                return
+            except (EOFError, OSError):
+                return
+            if msg[0] == "log":
+                log.log(msg[1], "%s", msg[2])
+            elif msg[0] == "result":
+                run.result = msg[1]
+
+    def _poll_children(self) -> None:
+        for run in self.running_jobs():
+            self._drain(run)
+            if not run.proc.is_alive():
+                run.proc.join(2.0)
+                self._drain(run)
+                self._reap(run)
+        self._flush_requeue()
+
+    def _flush_requeue(self) -> None:
+        """Preempted jobs go back to the front only once every sibling that is also being preempted has stopped, so that their ORIGINAL order is kept."""
+        if self._pending_requeue and not any(r.reason in ("preempt", "shutdown") for r in self.running_jobs()):
+            self.store.requeue_front_in_order(self._pending_requeue)
+            log.info("re-queued at the front, in order: jobs %s", [j for _o, j, _p in sorted(self._pending_requeue)])
+            self._pending_requeue = []
+
+    def _reap(self, run: Running) -> None:
+        jid = run.job_id
+        with self._guard:
+            self.running.pop(jid, None)
+        res = run.result
+        try:
+            if res is None:  # the process died without a word (segfault, CUDA fault, killed from outside)
+                if run.reason in ("preempt", "shutdown"):
+                    self._pending_requeue.append((run.job["queue_order"], jid, run.reason == "preempt"))
+                elif run.reason == "kill":
+                    self._finish_killed(jid)
+                elif run.reason == "redo":
+                    self._delete_files(self.store.reset_job_from_scratch(jid))
                 else:
-                    self._run_competition(run)
-            except Exception as e:  # noqa: BLE001
-                log.error("job %s failed: %s", job["id"], traceback.format_exc())
-                self.store.finish_job(job["id"], "error", "error", f"{type(e).__name__}: {e}")
-                if job["kind"] == "demo_race":
-                    self._fail_race(job["race_id"], f"{type(e).__name__}: {e}")
-            finally:
-                with self._guard:
-                    self.current = None
+                    n = self._crashes[jid] = self._crashes.get(jid, 0) + 1
+                    log.error("job %s: its process died (exit code %s), attempt %d of %d", jid, run.proc.exitcode, n, MAX_CRASHES)
+                    if n >= MAX_CRASHES:
+                        self.store.finish_job(jid, "error", "error", f"worker process died (exit code {run.proc.exitcode})")
+                        self._log_finished(run, {"outcome": "error"}, "error")
+                    else:
+                        self.store.requeue_front(jid, count_preemption=False)
+            elif res["outcome"] == "aborted":
+                log.info("job %s aborted (%s) at step %d", jid, run.reason, res.get("steps", 0))
+                if run.reason == "kill":
+                    self._finish_killed(jid)
+                    self._log_finished(run, res, "killed")
+                elif run.reason == "redo":
+                    self._delete_files(self.store.reset_job_from_scratch(jid))
+                else:  # preempt / shutdown (or an orphan check that fired for some other reason): back to the front, in order
+                    self._pending_requeue.append((run.job["queue_order"], jid, run.reason == "preempt"))
+            elif res["outcome"] == "oom":
+                self._oom_penalty = min(self._oom_penalty + 1, self.max_jobs - 1)
+                self._penalty_until = time.time() + self.oom_cooldown_s
+                self.store.requeue_front(jid, count_preemption=False)
+                log.warning("job %s ran out of GPU memory (%s): back to the FRONT of the queue; concurrency lowered to %d for %.0f s",
+                            jid, res.get("message", ""), self.effective_limit(), self.oom_cooldown_s)
+            else:  # done or error: the child already wrote the terminal state
+                self._log_finished(run, res, res.get("reason") or "error")
+        finally:
+            self._wake.set()
+
+    def _finish_killed(self, jid: int) -> None:
+        self.store.finish_job(jid, "killed", "killed")
+        self._delete_files(self.store.drop_checkpoints(jid))
+
+    def _log_finished(self, run: Running, res: dict, stop: str) -> None:
+        """One line per finished job (samples/s, active GPU seconds, the concurrency it ran under, why it stopped), and a warning for 'time'."""
+        active, samples = float(res.get("active_s", 0.0)), int(res.get("samples_seen", 0))
+        sps = samples / active if active > 0 else None
+        self.store.set_job_stats(run.job_id, concurrency=run.peak, samples_per_s=sps)
+        log.info("job %s finished: stop reason %s, %s samples/s, %.1f active GPU s, ran with up to %d job(s) at once", run.job_id, stop,
+                 f"{sps:,.0f}" if sps else "n/a", active, run.peak)
+        if stop == "time":
+            done = min(1.0, float(res.get("flops_used", 0.0)) / self.s.budget_flops) if self.s.budget_flops else 0.0
+            log.warning("job %s hit the %.0f s active-GPU-time cap (stop reason \"time\") after %.0f%% of its FLOPs budget: concurrency (up to %d jobs at "
+                        "once, limit %d) may be too high. Lower MAX_CONCURRENT_JOBS in backend/.env.", run.job_id, self.s.time_cap_seconds, 100 * done,
+                        run.peak, self.max_jobs)
+
+    def _shutdown_children(self) -> None:
+        """Server stopping: every child stops without saving, then the interrupted jobs go back to the front in order (recovery would do the same)."""
+        for r in self.running_jobs():
+            r.abort("shutdown")
+        t0 = time.time()
+        while self.running and time.time() - t0 < 20.0:
+            self._poll_children()
+            time.sleep(0.05)
+        for r in self.running_jobs():  # did not stop in time: end the process; the job is still 'running' in the database and is recovered at the next start
+            log.warning("job %s did not stop in time: terminating its process", r.job_id)
+            r.proc.terminate()
+            r.proc.join(2.0)
+            with self._guard:
+                self.running.pop(r.job_id, None)
+        self._flush_requeue()
 
     # ------------------------------------------------------------ demo race
     def _fail_race(self, race_id: str, message: str) -> None:
@@ -264,64 +490,14 @@ class Scheduler:
         self.store.finish_job(job["id"], "done", "budget" if reason != "aborted" else "killed")
         log.info("race %s finished: %s", race["id"], reason)
 
-    # ------------------------------------------------------------ competition training
-    def _run_competition(self, run: Running) -> None:
-        job = run.job
-        jid = job["id"]
-        sub = self.store.get_submission(job["submission_id"])
-        cfg, errors = resolve_config(json.loads(sub["config_json"]))
-        if errors:
-            raise ValueError("; ".join(errors))
-        trainer = CompetitionTrainer(cfg, self.chess_data(), self.device, budget_flops=self.s.budget_flops,
-                                     time_cap_s=self.s.time_cap_seconds, ckpt_every_s=self.s.checkpoint_seconds,
-                                     metrics_every_s=self.s.metrics_seconds)
-        ck = self.store.latest_checkpoint(jid)
-        if ck and Path(ck["path"]).is_file():
-            trainer.load_checkpoint(ck["path"])
-            log.info("job %s resumed from checkpoint at step %d (%d samples)", jid, trainer.step, trainer.samples_seen)
-        else:
-            log.info("job %s starting (%s, %s params)", jid, sub["nickname"], f"{cfg['param_count']:,}")
-        self.store.mark_running(jid)
-        job = self.store.get_job(jid)
-
-        def on_metrics(rec: dict) -> None:
-            self.store.add_metrics(jid, rec)
-            self.store.update_progress(jid, samples_seen=trainer.samples_seen, flops_used=trainer.flops_used,
-                                       active_gpu_seconds=trainer.active_s)
-
-        def on_checkpoint() -> None:
-            path = self.s.checkpoints_dir / str(jid) / f"ckpt_{trainer.step}.pt"
-            info = trainer.save_checkpoint(path)
-            self._delete_files(self.store.add_checkpoint(jid, info))
-
-        reason = trainer.run(run.should_abort, on_metrics, on_checkpoint)
-
-        if reason == "aborted":
-            why = run.reason
-            log.info("job %s aborted (%s) at step %d", jid, why, trainer.step)
-            if why in ("preempt", "shutdown"):
-                self.store.requeue_front(jid, count_preemption=(why == "preempt"))
-            elif why == "kill":
-                self.store.finish_job(jid, "killed", "killed")
-                self._delete_files(self.store.drop_checkpoints(jid))
-            elif why == "redo":
-                self._delete_files(self.store.reset_job_from_scratch(jid))
-            return
-
-        identity = {"nickname": sub["nickname"], "model_name": sub["model_name"], "participant_code": sub["participant_code"],
-                    "submission_id": sub["id"]}
-        out_dir = self.s.models_dir / sub["id"]
-        if reason == "diverged":
-            last = self.store.latest_checkpoint(jid)
-            if last and Path(last["path"]).is_file():  # ship the last finite weights, not NaNs
-                trainer.load_checkpoint(last["path"])
-                trainer.export(out_dir, "diverged", preemptions=job["preemptions"], identity=identity, started_at=job["started_at"])
-            else:
-                log.warning("job %s diverged before any checkpoint: no model saved", jid)
-        else:
-            meta = trainer.export(out_dir, reason, preemptions=job["preemptions"], identity=identity, started_at=job["started_at"])
-            log.info("job %s done: %s, val_mse %.4f", jid, reason, meta["val_mse"])
-        self.store.update_progress(jid, samples_seen=trainer.samples_seen, flops_used=trainer.flops_used, active_gpu_seconds=trainer.active_s)
-        self.store.finish_job(jid, "done", reason)
-        self._delete_files(self.store.drop_checkpoints(jid))
-        shutil.rmtree(self.s.checkpoints_dir / str(jid), ignore_errors=True)
+    def _run_race_job(self, job: dict) -> None:
+        run = Running(job)
+        self.race_run = run
+        try:
+            self._run_race(run)
+        except Exception as e:  # noqa: BLE001
+            log.error("job %s failed: %s", job["id"], traceback.format_exc())
+            self.store.finish_job(job["id"], "error", "error", f"{type(e).__name__}: {e}")
+            self._fail_race(job["race_id"], f"{type(e).__name__}: {e}")
+        finally:
+            self.race_run = None

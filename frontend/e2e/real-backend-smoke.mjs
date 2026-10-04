@@ -36,7 +36,7 @@ await check("submit the form: participant code, status moves on, an admin sees i
   await page.getByTestId("token").fill(process.env.ADMIN_TOKEN ?? "dev"); await page.getByTestId("login").click();
   await page.getByTestId("queue-table").waitFor({ timeout: 6000 });
   await page.getByText("Smoke Net").first().waitFor({ timeout: 6000 });
-  await page.getByTestId("monitor").getByText(/GPU/).waitFor({ timeout: 6000 });
+  await page.getByTestId("monitor").getByText(/GPU/).first().waitFor({ timeout: 6000 });
 });
 await check("wrong admin token is rejected", async () => {
   await page.goto(`${BASE}/admin`); await page.waitForTimeout(400);

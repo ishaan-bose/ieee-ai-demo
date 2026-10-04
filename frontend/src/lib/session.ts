@@ -12,3 +12,8 @@ export function setHumanDuel(score: number, rounds: number) { set({ ...state, hu
 export function useSession(): SessionStats {
   return useSyncExternalStore((f) => { subs.add(f); return () => subs.delete(f); }, () => state);
 }
+
+// Test hook (mock mode only): lets the Playwright layout check put large values into the finale's stat boxes.
+if (typeof window !== "undefined" && new URLSearchParams(location.search).get("mock") === "1") {
+  (window as unknown as { __byoai: unknown }).__byoai = { set: (p: Partial<SessionStats>) => set({ ...state, ...p }) };
+}

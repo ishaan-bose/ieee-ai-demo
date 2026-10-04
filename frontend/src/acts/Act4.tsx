@@ -2,7 +2,6 @@ import { motion } from "framer-motion";
 import QRCode from "qrcode";
 import { useEffect, useRef, useState } from "react";
 import { Unlock } from "../components/ui";
-import { BOOTH_URL } from "../lib/env";
 import { useSession } from "../lib/session";
 import { useStage, useStageEvent } from "../state/StageProvider";
 
@@ -75,26 +74,36 @@ function human(n: number): string {
   return `${(n / u[1]).toFixed(n / u[1] >= 100 ? 0 : 1)}${u[0]}`;
 }
 
+/** The only place the finale points to: the club's own site. (Not the dev server, not VITE_BOOTH_URL: the QR must always work on a phone.) */
+export const CLUB_URL = "https://ieeecspesu.vercel.app";
+
 function Close() {
   const s = useSession();
   const qr = useRef<HTMLCanvasElement>(null);
-  useEffect(() => { if (qr.current) QRCode.toCanvas(qr.current, BOOTH_URL, { width: 220, margin: 1, color: { dark: "#0f172a", light: "#f8fafc" } }).catch(() => undefined); }, []);
+  useEffect(() => { if (qr.current) QRCode.toCanvas(qr.current, CLUB_URL, { width: 260, margin: 1, color: { dark: "#0f172a", light: "#f8fafc" } }).catch(() => undefined); }, []);
   const mins = Math.max(1, Math.round((Date.now() - s.startedAt) / 60000));
   return (
-    <div className="flex items-start gap-12" data-testid="close">
+    <div className="flex flex-col" data-testid="close">
       <Unlock id="stats">
-        <div className="grid grid-cols-3 gap-5" data-testid="stats">
-          {[["training runs", String(s.runs)], ["parameters trained", human(s.paramsTrained)], ["compute used", `${human(s.flops)}FLOPs`]].map(([label, v]) => (
-            <motion.div key={label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-[280px] rounded-3xl bg-slate-900/70 p-6"><div className="font-mono text-6xl font-bold text-sky-300">{v}</div><div className="mt-2 text-2xl text-slate-400">{label}</div></motion.div>))}
-          <div className="col-span-3 text-xl text-slate-500">this session: {mins} min{s.humanDuel ? ` · duel score ${s.humanDuel.score}/${s.humanDuel.rounds}` : ""}</div>
+        <div data-testid="stats">
+          {/* each box sizes to its content (nowrap + padding), so 4-digit run counts and "3.6P FLOPs" stay inside their background */}
+          <div className="flex flex-wrap gap-6">
+            {[["training runs", String(s.runs)], ["parameters trained", human(s.paramsTrained)], ["compute used", `${human(s.flops)} FLOPs`]].map(([label, v]) => (
+              <motion.div key={label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} data-testid="stat-box" className="min-w-[300px] rounded-3xl bg-slate-900/70 px-8 py-6">
+                <div className="whitespace-nowrap font-mono text-5xl font-bold text-sky-300">{v}</div><div className="mt-2 whitespace-nowrap text-2xl text-slate-400">{label}</div>
+              </motion.div>))}
+          </div>
+          <div className="mt-3 text-xl text-slate-500">this session: {mins} min{s.humanDuel ? ` · duel score ${s.humanDuel.score}/${s.humanDuel.rounds}` : ""}</div>
         </div>
       </Unlock>
-      <div className="flex flex-col gap-6">
+      <div className="mt-10 flex flex-col gap-8">
         <Unlock id="booth">
-          <div className="flex items-center gap-6 rounded-3xl bg-slate-900/70 p-6"><canvas ref={qr} className="rounded-xl" />
-            <div><div className="text-3xl font-semibold text-slate-100">Build your own chess AI</div><div className="mt-2 break-all font-mono text-2xl text-sky-300" data-testid="booth-url">{BOOTH_URL}</div><div className="mt-2 text-xl text-slate-400">Tournament after the event.</div></div></div>
+          <div className="flex w-full max-w-[1300px] items-center gap-10 rounded-3xl bg-slate-900/70 p-8" data-testid="club-card">
+            <canvas ref={qr} className="shrink-0 rounded-xl" style={{ width: 260, height: 260 }} data-testid="qr" />
+            <p className="min-w-0 text-4xl font-semibold leading-snug text-slate-100">Scan this link to check out our club! Or alternatively, go to <span className="mt-1 block whitespace-nowrap font-mono text-sky-300" data-testid="club-url">{CLUB_URL}</span></p>
+          </div>
         </Unlock>
-        <Unlock id="pitch"><p className="max-w-[640px] text-4xl font-bold leading-snug text-amber-200">We do AI research that makes training cheaper, faster or more accurate.</p></Unlock>
+        <Unlock id="pitch"><p className="max-w-[1100px] text-5xl font-bold leading-snug text-amber-200">We do AI research that makes training cheaper, faster or more accurate.</p></Unlock>
       </div>
     </div>
   );

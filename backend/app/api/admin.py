@@ -47,6 +47,7 @@ def _job_out(j: dict, budget: float) -> JobOut:
                   param_count=j.get("param_count"), config_summary=_summary(j.get("config_json")), priority=j["priority"],
                   stop_reason=j["stop_reason"], progress=prog, samples_seen=j["samples_seen"], flops_used=j["flops_used"],
                   active_gpu_seconds=j["active_gpu_seconds"], preemptions=j["preemptions"], error_message=j["error_message"],
+                  concurrency=j.get("concurrency"), samples_per_s=j.get("samples_per_s"),
                   created_at=j["created_at"], started_at=j["started_at"], finished_at=j["finished_at"])
 
 
@@ -55,7 +56,7 @@ def queue(request: Request, include_removed: bool = False) -> QueueOut:
     st = request.app.state
     cur = st.scheduler.current
     return QueueOut(paused=st.store.is_paused(), demo_mode=st.store.is_demo_mode(), current_job_id=cur.job_id if cur else None,
-                    budget_flops=st.settings.budget_flops,
+                    running_job_ids=[r.job_id for r in st.scheduler.running_jobs()], budget_flops=st.settings.budget_flops,
                     jobs=[_job_out(j, st.settings.budget_flops) for j in st.store.list_jobs(include_removed)])
 
 
@@ -130,10 +131,8 @@ def reset(body: ResetIn, request: Request) -> ResetOut:
     if body.confirm != "RESET":
         raise api_error(400, "bad_request", "type RESET to confirm")
     snap = st.store.snapshot(st.settings.state_dir / "snapshots" / f"demo-{time.strftime('%Y%m%d-%H%M%S')}.db")
-    cur = st.scheduler.current
-    if cur:
-        cur.abort("kill")
-        st.scheduler.wait_idle(20.0)
+    st.scheduler.kill_all()  # every running job (several can be training at once) stops without saving
+    st.scheduler.wait_idle(30.0)
     st.store.clear_runs()
     for d in (st.settings.models_dir, st.settings.checkpoints_dir):
         if d.is_dir():
@@ -202,6 +201,7 @@ async def stream(request: Request, limit: int | None = Query(None, ge=1, descrip
             job = st.store.get_job(cur.job_id) if cur else None
             payload = {"t": time.time(), "paused": st.store.is_paused(), "demo_mode": st.store.is_demo_mode(),
                        "current_job_id": cur.job_id if cur else None, "kind": cur.kind if cur else None,
+                       "running_job_ids": [r.job_id for r in st.scheduler.running_jobs()],
                        "progress": min(1.0, job["flops_used"] / st.settings.budget_flops) if job and job["kind"] == "competition" else None,
                        "curves": st.store.curves(cur.job_id, 200) if cur and cur.kind == "competition" else None,
                        "gpu": gpu_stats(st.device.device), "log_tail": logbuf.tail(15)}

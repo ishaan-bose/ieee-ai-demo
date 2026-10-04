@@ -49,7 +49,7 @@ export const STAGES: Stage[] = [
   { id: "a4-rematch", act: 4, title: "Rematch: you vs. the trained AI", unlocks: ["doodle", "options", "score", "gauge", "rematch"], hint: "Space: start · 1-4: answer",
     notes: ["Same duel as the start. This time the AI is the trained network and it sees only the strokes drawn so far.", "Compare with your first score.", "It is not magic: it is the knobs you just learned."] },
   { id: "a4-close", act: 4, title: "That's the club", unlocks: ["stats", "booth", "pitch"], hint: "",
-    notes: ["Session stats: runs, parameters trained, compute used.", "Point to the booth QR/link: build your own chess AI. Tournament after the event.", "One line: we do AI research that makes training cheaper, faster or more accurate.", "Hand back to the slides."] },
+    notes: ["Session stats: runs, parameters trained, compute used.", "Point to the QR code: scan it (or type ieeecspesu.vercel.app) to check out the club.", "One line: we do AI research that makes training cheaper, faster or more accurate.", "Hand back to the slides."] },
 ];
 
 export const stageIndex = (id: string) => STAGES.findIndex((s) => s.id === id);
