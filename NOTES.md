@@ -1,4 +1,4 @@
-# NOTES — assumptions, findings, open issues
+# NOTES: assumptions, findings, open issues
 
 Items are tagged **[owner]** when the owner must check or decide something.
 
@@ -101,3 +101,106 @@ never noticed. Two fixes:
 6. **[owner]** Is the laptop Windows or Mac? README covers both for the tunnel loop.
 7. The `httpx`-based Starlette TestClient prints a deprecation warning with the newest Starlette.
    Harmless; revisit if it breaks.
+
+
+---
+
+# Phases 2-11 (one-shot build): decisions, findings, open issues
+
+## Owner decisions applied
+- **Accepted data imperfections are statistics, never failures.** The Quick, Draw! "larger side spans N" (normalisation slack) and the
+  Lichess `mat`-vs-boards mismatches are counted and printed by `python -m app.data.contract` (see "Statistics") and by
+  `check_data_dir(..., stats=...)`. Nothing in the code reads the stored `mat` array: material is always computed from the boards
+  (`encoder.material_from_boards`, `tournament/engine/evaluators.py`, `play.material_diff`).
+- **Branch.** Everything is on `claude/upbeat-gauss-3pb7rg` (restarted from `main` after the phase 1 merge). Nothing was pushed to `main`.
+- **The metrics trap uses `marvin`** (SPEC 4.2 / 5.3: ~2% positives, "always no" scores ~98%), not the "cat-vs-rest" wording of the build prompt:
+  SPEC.md is the source of truth. The cached JSON also contains a class-weighted variant that shows the fix.
+
+## Design calls (things SPEC left open)
+**Data and features**
+- *Rasterizer* (`shared/RASTERIZER.md`): normalise (translate to the origin, larger side to 255, aspect ratio kept, **not centred**, matching the
+  top-left alignment of the data), map into 28x28 with a 2 px margin, analytic anti-aliased lines of width 2 (`clamp(1.5 - dist, 0, 1)`), union by max.
+  Python and TypeScript agree to within 1 grey level on the golden fixtures (Python reproduces its own fixture exactly).
+- *Log-mel* (`shared/AUDIO_FEATURES.md`): 25 ms / 10 ms periodic-Hann frames, 512-point FFT, 40 HTK-mel triangles 20-7600 Hz, `ln(x + 1e-6)`,
+  per-clip standardisation; 40 x 98. The raw-waveform model gets `int16/32768` average-pooled by 4 (4000 inputs) so it stays small in the browser.
+- *Chess input*: 768 piece planes (+5 side-to-move/castling, +8 en passant, +10 material counts, +128 attack maps, each optional). Attack maps ignore pins
+  (pseudo-attacks, defended own pieces count) and are verified against python-chess on 200 real positions. The colour-flip augmentation is an exact
+  symmetry (verified against `chess.Board.mirror`).
+- *Targets*: `winprob` = `sigmoid(cp/K)`, `cp` = clipped centipawns / K; mates become +-`mate_clip`; with `perspective_flip` the target is for the side to move
+  (the **input is not mirrored**, only the target and the stm flag). Output heads map into target space (`encoder.head_to_target_space`); `bce` needs `winprob`.
+- *Comparable validation number*: every run reports `val_mse` = win-probability MSE at K=400 / clip 2000 (the same for every config) next to its own `val_loss`.
+- *Parameters / FLOPs*: the first layer is included; biases and LayerNorm affine are counted in parameters; FLOPs = 6 x matmul weights x samples (biases/norms excluded).
+  The activation list includes `hard_step` on purpose (it cannot learn: a fun way to lose).
+
+**Training and scheduling**
+- `BUDGET_FLOPS` default is a placeholder `1e16`; `scripts/benchmark.py` section 6 calibrates it (9-minute median config) into `STATE_DIR/calibration.json`.
+- Doodle race net: MLP 784-128-64-10, momentum SGD by default, MSE/L1/Huber on output *probabilities* averaged over elements (slow on purpose: the drama).
+- **Recorded races are one lane alone on the GPU.** The frontend composes up to 3 recorded lanes, so a replayed lane gets ~3x more updates per second than the same
+  lane in a live 3-lane race. For batch-size drama this is mostly fine; if you want exact parity, re-record with 3 identical dummy lanes sharing the GPU.
+- Pause and Demo Mode both **preempt** a running competition job (it returns to the front and loses only the seconds since its last checkpoint). Kill/redo beat
+  an automatic preemption (abort-reason priority). A race that is queued behind another race waits FCFS; the browser falls back to the recording after 9 s without a tick.
+- A diverged (NaN) run ships its **last finite checkpoint**, or no model at all if it diverged before the first checkpoint. The sanity gate then excludes broken ones.
+- Nuclear reset keeps `models/house-net/` (it is not a participant run) and snapshots the DB first. The default-config baseline lives in `baselines/`, outside `models/`.
+- The admin export leaves out `contact` unless `include_contact=true` (SPEC 13).
+- DB migration v1 -> v2 adds `submissions.client_id` (idempotent uploads after a network drop). Participants poll their own status by the unguessable `submission_id`.
+- Submissions require the consent tick (the form says it covers the contact and anonymised logging).
+
+**Frontend**
+- The layout is designed for 1600x900 and scaled to the viewport with CSS `zoom` (0.55x-1.6x). Projector resolution is untested.
+- Duel: drawings replay at a constant 420 data-units/s; the 4 options appear after 3 strokes (or 40% of the path); the model in the rematch sees exactly the part drawn when the human answers.
+- Act 1 uses a tiny TS MLP (Adam, mini-batch 64, BCE) in a Web Worker; "depth" = hidden layers (linear stack width 8), "width" = hidden units; the gallery trains 3 x 16.
+- The offline marker is visible only after pressing `P` (so the audience never sees it); the phone's `/presenter` page shows a red banner when the server is down.
+- Presenter sync: `BroadcastChannel` (same browser) and `PUT/GET /api/presenter` (phone over the laptop's LAN address). The latter needs `FRONTEND_HOST=0.0.0.0` (exposes the dev server on Wi-Fi).
+- Mic: `ScriptProcessorNode` (deprecated but universal), hold-to-talk, the 1-second window with the most energy, peak-normalised only when very quiet. Failure falls back to the 20 sample clips automatically.
+- The 3D valley is a one-dimensional cartoon drawn as a surface (height depends on one knob); WebGL missing -> 2D version.
+- The Vite proxy serves the SPA for browser navigations to `/admin` and proxies everything else under `/admin` to the backend (they share a prefix).
+- Stage hint for Act 3: `,` and `.` switch clips (the arrow keys are stage navigation).
+
+**Tournament**
+- Search: negamax alpha-beta, iterative deepening, leaf batches per parent node, fixed ordering (MVV-LVA then UCI), alphabetical exact-tie break at the root, no capture
+  extension, no repetition detection inside the search (the game loop adjudicates threefold/fifty-move). Mate scores are +-(100000 - ply).
+- Depth per model = 2 x `search_depth_full_moves` plies, optionally capped (`--depth-cap-plies 4`) or limited by `--node-cap`.
+- Swiss pairing by score while `rounds <= n/2 - 1` (a pairing without repeats then always exists); beyond that a deterministic circle-method round robin.
+  An unpaired model plays a reference bot twice; with an odd count nobody rests twice before everyone has.
+- Sanity gate: one game vs the random mover as White at 2 plies, 80-ply cap; it fails if the model forfeits (NaN, illegal move) or **loses** (a draw passes).
+  An untrained net can lose that game: `--override-sanity` keeps it.
+- Games end at 150 plies: a side ahead by >= 2 pawns wins by adjudication. Bracket: top 8 by rating, 2 games per match (colours swapped), a third game on a tie (higher seed White), then the higher seed advances.
+- The random mover is deterministic (CRC of the position), so repeat runs are byte-identical (tested). Stockfish is optional (`--stockfish PATH`, fixed depth, 1 thread).
+- Ratings: Bradley-Terry (MM) with a weak prior so perfect records stay finite; Elo = 400 log10; **the random mover is pinned to 0**.
+
+## Things that could not be verified here (need the real box / data / laptop)
+See FINAL_REPORT.md section 3. In short: every CUDA code path, the real data volume (12M rows, 1.09M doodles), training quality and timing, the real microphone and
+browsers other than Chromium, projector scaling, Windows laptop commands, the server's Python 3.12 + NVIDIA torch 2.8 install, systemd/boot start.
+
+## Open issues
+1. **Tier thresholds and depths are placeholders** (`shared/tiers.json`). The benchmark writes `tiers.suggested.json`. On this CPU sandbox even depth 2 was slower than 1.5 s/move: the GPU numbers will tell.
+2. **`torch.cuda.utilization()` needs `pynvml`**; without it the admin monitor shows GPU "n/a" (memory is still shown).
+3. **Browser inference**: Node/V8 measured < 10 ms for every bundled model and 4 ms for the log-mel features; run `npm run bench:inference` on the laptop for the real figure.
+4. The first competition job after a restart loads the 12M-row arrays (about 850 MB to the GPU, or memory-mapped on the CPU plan): expect a pause of tens of seconds before step 1.
+5. `ScriptProcessorNode` may be removed from browsers some day; replace with an AudioWorklet then.
+6. Chess strength of the House Net is whatever the random search finds in the time it is given (`train_house_net.py --trials N`); you can also hand it a config with `--config file.json`.
+7. Frontend playback of the tournament (bracket.json) is not built (SPEC 12 cut order lists it as a first thing to drop); the data for it is ready.
+8. Start-at-boot is still manual (see the phase 1 note); `start_backend.sh` is idempotent.
+
+- Mock e2e "Act 3 overfit" once failed with `Malformed value`: a stale gitignored `frontend/public/cache/act3/overfit.json` from the `run_on_server.sh --quick` rehearsal had only 2 runs, so the slider max was 1. The test now fills the slider's own max. Delete `frontend/public/cache/` after rehearsals (the stage that syncs real caches overwrites it anyway).
+
+## Performance fix: the freeze on the first screens
+
+- **Root cause.** `Duel.tsx` computed `seed = Number(urlParam("seed") ?? Math.floor(Math.random() * 1e6))` on every render. A new seed re-created `load`,
+  `useEffect(load, [load])` re-ran, `setRounds` re-rendered, which produced a new seed: an endless render loop on the first screen (and on the
+  rematch). Measured under a 4x CPU throttle: 95% (dev) / 76% (production build) main-thread CPU on the idle first screen, JS event listeners
+  growing 935 -> 5344 (dev) / 3659 -> 35121 (production), heap +29 / +58 MB, and the page stopped answering key presses. Every e2e test passed
+  `&seed=3` in the URL, which turns the random seed off, so none of them ever ran the buggy path. The seed is now fixed per component instance.
+- **Other things fixed because they were measured or clearly wasteful:** the stage wrapper used `AnimatePresence mode="wait"` (the old stage stayed mounted
+  250 ms and re-rendered against the new stage's context) -> no exit animation; every `Unlock` replayed its spring on every stage -> only elements unlocked
+  by the current stage animate; the network diagram redrew ~1000 edges at 60 fps forever -> on demand; the 3D valley rendered at the display rate forever ->
+  24 fps on demand, dpr capped at 1.5; canvases resized their bitmap on every frame (`canvas.width = ...`) -> `lib/canvas.ts fitCanvas`; the gallery
+  re-plotted 15 cards on every training tick and on every entry -> memoised + cached; the Act 1 worker was created on mount (twice under StrictMode) ->
+  created on the first training run; the morph / line animations re-rendered the whole act at 60 fps -> ~30 fps; presenter sync fired one request per key
+  press even against a switched-off backend -> only when online and debounced 300 ms; the health poll re-rendered every consumer every 3 s -> only on change.
+- **Looked at and found fine:** no heavy CSS (no backdrop-filter, blur, shadows), the model `.bin` files and race JSON are fetched once and cached, no
+  BroadcastChannel echo (the presenter never posts back), key listeners are removed on every cleanup, the health poll is one 3 s interval with no retry
+  loop, workers are terminated on unmount.
+- **Dev builds are ~2x slower than production** (React dev mode + StrictMode renders everything twice); the gate's 200 ms limit passes on both.
+- `real-backend-smoke.mjs` can fail its "live" check right after the backend starts (the first race pays PyTorch's cold-start cost, more than the 15 s it
+  waits). Start the backend and run one race by hand first, or just re-run.

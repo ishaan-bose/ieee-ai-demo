@@ -80,7 +80,13 @@ def test_checker_catches_bad_lichess(tmp_path):
     np.save(d / "boards.npy", b)
     probs = contract.check_lichess(d)
     assert any("white king" in p for p in probs) and any("npc" in p for p in probs)
+    assert not any("mat" in p.split(":")[0] for p in probs)
     d = write_lichess(tmp_path / "c", 50)
+    st = {}
+    mat = np.load(d / "mat.npy")
+    mat[5] += 1  # a mat/board mismatch is a statistic, not a failure
+    np.save(d / "mat.npy", mat)
+    assert contract.check_lichess(d, stats=st) == [] and st["mat_mismatch_rows"] == 1
     m, cp = np.load(d / "mate.npy"), np.load(d / "cp.npy")
     i = int(np.flatnonzero(m == 0)[0])
     m[i] = 3
@@ -96,7 +102,9 @@ def test_checker_catches_bad_quickdraw(tmp_path):
     duel[0]["d"][0][0].append(5)  # xs longer than ys
     (d / "duel.json").write_text(json.dumps(duel))
     assert any("unequal" in p for p in contract.check_quickdraw_processed(d))
-    assert contract.check_quickdraw_record({"c": 3, "k": "1", "d": [[[0, 100], [0, 50]]]})  # spans only 100
+    st: dict = {}  # a record spanning only 100 is a statistic, not a failure (accepted imperfection)
+    assert not contract.check_quickdraw_record({"c": 3, "k": "1", "d": [[[0, 100], [0, 50]]]}, stats=st)
+    assert st["larger_side_not_255"] == 1 and st["larger_side_spans_less_than_252"] == 1
     assert contract.check_quickdraw_record({"c": 10, "k": "1", "d": [[[0, 255], [0, 3]]]})  # bad class
     assert not contract.check_quickdraw_record({"c": 9, "k": "1", "d": [[[1, 255], [0, 3]]]})
 

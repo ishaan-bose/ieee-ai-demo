@@ -13,8 +13,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import __version__, db
-from app.api import dev, health
+from app import __version__, db, logbuf
+from app.scheduler.worker import Scheduler
+from app.store import Store
+from app.api import admin, demo, dev, health, presenter, submissions
 from app.config import get_settings
 from app.device import detect_device
 from app.selfcheck import run_self_check
@@ -28,15 +30,21 @@ GRACEFUL_SHUTDOWN_SECONDS = 3
 async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.state_dir.mkdir(parents=True, exist_ok=True)
+    logbuf.install(settings.log_dir)
     db.init_db(settings.db_path)
     app.state.settings = settings
     app.state.device = detect_device()
+    app.state.store = Store(settings.db_path)
+    app.state.scheduler = Scheduler(settings, app.state.device, app.state.store)
     app.state.self_check = (
         run_self_check(settings, app.state.device, print_fn=lambda s: print(s, flush=True))
         if settings.run_self_check else None
     )
-    # Phase 6: re-queue interrupted jobs from their checkpoints here (SPEC 6.3).
-    yield
+    app.state.scheduler.start()  # re-queues interrupted jobs from their checkpoints (SPEC 6.3), then idles until work arrives
+    try:
+        yield
+    finally:
+        app.state.scheduler.stop()
 
 
 app = FastAPI(title="Build Your Own AI backend", version=__version__, lifespan=lifespan)
@@ -71,6 +79,10 @@ async def unhandled_error(_: Request, exc: Exception) -> JSONResponse:
 
 app.include_router(health.router)
 app.include_router(dev.router)
+app.include_router(demo.router)
+app.include_router(submissions.router)
+app.include_router(admin.router)
+app.include_router(presenter.router)
 
 
 def main() -> None:

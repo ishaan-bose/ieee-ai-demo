@@ -1,0 +1,109 @@
+"""Regenerate shared/golden/*.json from data/samples/ (only needed if the specs change).
+
+Run from backend/:  python3 scripts/make_golden.py
+Tests check the committed fixtures against both Python and TypeScript.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.data import audio_features as af  # noqa: E402
+from app.data.rasterizer import rasterize  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[2]
+OUT = ROOT / "shared" / "golden"
+
+
+def rasterizer_fixture() -> dict:
+    qd = ROOT / "data" / "samples" / "quickdraw"
+    samples = json.loads((qd / "samples.json").read_text())
+    duel = json.loads((qd / "duel.json").read_text())
+    cases = []
+    for r in samples[::3] + duel[:6]:
+        cases.append({"name": f"qd_{r['k']}", "strokes": r["d"], "pixels": rasterize(r["d"]).ravel().tolist()})
+    # browser-style input: float canvas coordinates at a different scale/offset, a dot, a straight line
+    rng = np.random.default_rng(0)
+    pts = np.cumsum(rng.normal(0, 25, (40, 2)), axis=0) + 300
+    browser = [[np.round(pts[:20, 0], 2).tolist(), np.round(pts[:20, 1], 2).tolist()],
+               [np.round(pts[20:, 0], 2).tolist(), np.round(pts[20:, 1], 2).tolist()]]
+    for name, strokes in (("browser_scale", browser), ("single_dot", [[[120], [80]]]),
+                          ("horizontal_line", [[[10, 400], [50, 50]]]),
+                          ("same_shape_scaled", [[[x * 2 + 7 for x in s[0]], [y * 2 + 3 for y in s[1]]] for s in samples[0]["d"]])):
+        cases.append({"name": name, "strokes": strokes, "pixels": rasterize(strokes).ravel().tolist()})
+    return {"spec": "shared/RASTERIZER.md", "size": 28, "tolerance": 1, "cases": cases}
+
+
+def audio_fixture() -> dict:
+    d = ROOT / "data" / "samples" / "speech"
+    samples = json.loads((d / "samples.json").read_text())
+    cases = []
+    for s in [samples[0], samples[5], samples[10], samples[17]]:
+        wav = af.read_wav(d / "samples" / s["file"])
+        lm = af.log_mel(wav)
+        cases.append({"file": s["file"], "n_samples": int(len(wav)), "log_mel": np.round(lm, 5).tolist(),
+                      "raw_input_head": np.round(af.raw_input(wav)[:64], 6).tolist()})
+    fb = af.mel_filterbank()
+    return {"spec": "shared/AUDIO_FEATURES.md", "tolerance": 1e-3, "n_frames": af.N_FRAMES,
+            "window_head": np.round(af._WINDOW[:8], 8).tolist(),
+            "fbank_rows": {str(m): np.round(fb[m], 6).tolist() for m in (0, 19, 39)},
+            "cases": cases}
+
+
+def inference_fixture() -> dict:
+    """Tiny conv and dense models in the browser format + torch outputs, for the TypeScript forward-pass test."""
+    import torch
+    import torch.nn as nn
+
+    from app.export_format import export_sequential
+
+    models = []
+    for name, build, shape in (
+        ("conv", lambda: nn.Sequential(nn.Conv2d(1, 2, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2), nn.Conv2d(2, 3, 3, padding=1), nn.ReLU(),
+                                       nn.Flatten(), nn.Linear(3 * 4 * 5, 4)), (1, 8, 10)),
+        ("dense", lambda: nn.Sequential(nn.Linear(6, 5), nn.ReLU(), nn.Linear(5, 3)), (6,)),
+    ):
+        torch.manual_seed(3)
+        m = build()
+        layers, w = export_sequential(m)
+        rng = np.random.default_rng(1)
+        cases = []
+        for _ in range(3):
+            x = rng.normal(size=shape).astype(np.float32)
+            cases.append({"x": x.ravel().tolist(), "y": m(torch.from_numpy(x)[None]).detach().numpy()[0].tolist()})
+        models.append({"name": name, "input_shape": list(shape), "layers": layers, "weights": w.tolist(), "cases": cases})
+    return {"tolerance": 1e-4, "models": models}
+
+
+def config_defaults_fixture() -> dict:
+    """Defaults, ranges and the tier table, so the /build form works offline and agrees with the server."""
+    from app.chess_net.config import DEFAULT_CONFIG, MAX_LAYERS, MAX_PARAMS, MAX_WIDTH, MIN_WIDTH, CompetitionConfig, tier_table
+    from app.activations import ACTIVATION_NAMES
+
+    from app.chess_net.config import resolve_config
+
+    cases = []
+    for raw in ({}, {"layers": 4, "width": 1024}, {"layer_widths": [512, 256, 64], "normalization": "layernorm"},
+                {"layers": 6, "width": 2048, "input_extras": {"attacks": True, "material": True, "en_passant": True}},
+                {"layers": 2, "width": 8, "input_extras": {"stm_castle": False}}, {"layers": 7, "width": 2048}):
+        r, e = resolve_config(raw)
+        cases.append({"config": raw, "param_count": r["param_count"], "tier": r["tier"], "in_dim": r["in_dim"], "matmul_params": r["matmul_params"]})
+    props = CompetitionConfig.model_json_schema()["properties"]
+    return {"param_cases": cases, "defaults": DEFAULT_CONFIG, "tiers": tier_table(), "max_params": MAX_PARAMS, "max_layers": MAX_LAYERS,
+            "width_range": [MIN_WIDTH, MAX_WIDTH], "activations": list(ACTIVATION_NAMES),
+            "ranges": {k: {a: v[a] for a in ("minimum", "maximum") if a in v} for k, v in props.items()}}
+
+
+if __name__ == "__main__":
+    OUT.mkdir(parents=True, exist_ok=True)
+    (ROOT / "shared" / "config_defaults.json").write_text(json.dumps(config_defaults_fixture(), indent=1))
+    (OUT / "inference.json").write_text(json.dumps(inference_fixture(), separators=(",", ":")))
+    (OUT / "rasterizer.json").write_text(json.dumps(rasterizer_fixture(), separators=(",", ":")))
+    (OUT / "audio.json").write_text(json.dumps(audio_fixture(), separators=(",", ":")))
+    print("wrote", [f"{p.name} {p.stat().st_size // 1024} KB" for p in sorted(OUT.glob("*.json"))])

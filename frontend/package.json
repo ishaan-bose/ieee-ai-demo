@@ -10,20 +10,39 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "predev": "node scripts/sync-data.mjs",
+    "prebuild": "node scripts/sync-data.mjs",
+    "pretest": "node scripts/sync-data.mjs",
+    "bench:inference": "tsx scripts/bench-inference.ts",
+    "e2e": "node e2e/mock-walkthrough.mjs",
+    "e2e:perf": "node e2e/perf-regression.mjs",
+    "perf:probe": "node e2e/perf-probe.mjs"
   },
   "dependencies": {
+    "@react-three/fiber": "^9.8.1",
+    "d3": "^7.9.0",
+    "framer-motion": "^14.0.0",
+    "qrcode": "^1.5.4",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@types/d3": "^7.4.3",
     "@types/node": "^26.6.4",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "playwright": "^1.63.0",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.2"
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
   }
 }

@@ -12,3 +12,9 @@ checkpoints/
 .DS_Store
 *.tsbuildinfo
 .pytest_cache/
+
+# generated on the server / synced at build time (see README: scp artifacts.tgz)
+frontend/public/models/
+frontend/public/cache/
+frontend/public/data/
+e2e-fail-*.png
